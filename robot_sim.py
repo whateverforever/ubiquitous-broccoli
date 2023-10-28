@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 import pygame
+import pygame.gfxdraw
 
 pygame.init()
 vec2 = pygame.math.Vector2
@@ -36,6 +37,12 @@ def main():
                 if event.key == pygame.K_b:
                     print("restarting backwards")
                     rob.plan_move_to([0.0, 0], [-2 * np.pi / 10, -2 * np.pi / 5])
+                if event.key == pygame.K_w:
+                    print("running random whatever")
+                    rob.plan_move_to(
+                        np.random.uniform(0, 3.14, size=2),
+                        [-2 * np.pi / 10, -2 * np.pi / 5],
+                    )
 
         screen.fill((80, 80, 80))
         rob.update_joints()
@@ -63,6 +70,8 @@ class Robot:
         self.lengths = lengths
         self.jangles_rad = np.zeros(len(self.lengths))
         self.movequeue: t.List[Movement] = []
+
+        self._tips = []
 
     def plan_move_to(self, angles_rad, speeds_radps):
         assert len(angles_rad) == len(self.lengths) == len(self.jangles_rad)
@@ -94,14 +103,18 @@ class Robot:
         ), f"elasped failed {active_move}"
 
         if all(active_move.move_elapsed >= active_move.move_planned):
-            print("popping", active_move)
+            print(
+                "popping",
+                active_move,
+                "had target",
+                np.rad2deg(active_move.target_state),
+            )
             self.movequeue.pop(0)
             self.jangles_rad = np.array(active_move.target_state)  # cheat
             return
 
         if active_move.last_update:
             where_needmove = active_move.move_elapsed < active_move.move_planned
-            print("where_needmove", where_needmove)
 
             ticks_passed = now - active_move.last_update
             secs_passed = ticks_passed / 1000
@@ -110,6 +123,7 @@ class Robot:
 
             self.jangles_rad[where_needmove] += move_amount
             active_move.move_elapsed[where_needmove] += np.abs(move_amount)
+            print("jangles", self.jangles_rad)
 
         active_move.last_update = now
 
@@ -124,10 +138,19 @@ class Robot:
             next_pt = xy + link_vec * joint_len
 
             armpoly = get_arm_poly(xy, next_pt)
-            pygame.draw.polygon(surface, (255, 255, 255), armpoly, width=2)
+            pygame.draw.aalines(surface, (255, 255, 255), True, armpoly)
 
             xy = next_pt
             prev_angle = joint_angle
+
+        self._tips.append(xy)
+        if len(self._tips) >= 2:
+            pygame.draw.aalines(surface, (245, 0, 245, 10), False, self._tips)
+            pygame.draw.aalines(surface, (255, 255, 255), False, self._tips[-6:])
+
+        font = pygame.font.SysFont(None, 24)
+        img = font.render(f"Move Queue Len: {len(self.movequeue)}", True, (255, 255, 255))
+        surface.blit(img, (20, 20))
 
 
 def get_arm_poly(pt_origin, pt_end):

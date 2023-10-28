@@ -1,9 +1,10 @@
 import sys
+import typing as t
+from dataclasses import dataclass, field
 
 import numpy as np
 
 import pygame
-from pygame.locals import *
 
 pygame.init()
 vec2 = pygame.math.Vector2
@@ -19,52 +20,114 @@ def main():
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("2D Arm Plotter")
 
+    rob = Robot([WIDTH // 2, HEIGHT // 2], [200, 100])
+    rob.plan_move_to([3.14, 3.14], [2 * np.pi / 10, 2 * np.pi / 5])
+
     while True:
         for event in pygame.event.get():
-            if event.type == QUIT:
+            if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    print("restarting")
+                    rob.plan_move_to([0.0, 0], [2 * np.pi / 10, 2 * np.pi / 5])
+                    rob.plan_move_to([3.14, 3.14], [2 * np.pi / 10, 2 * np.pi / 5])
+                if event.key == pygame.K_b:
+                    print("restarting backwards")
+                    rob.plan_move_to([0.0, 0], [-2 * np.pi / 10, -2 * np.pi / 5])
 
         screen.fill((80, 80, 80))
-
-        # pts = get_arm_poly([100, 100], [170, 230])
-        # pygame.draw.polygon(screen, (255, 255, 255), pts, width=1)
-        # pts = get_arm_poly([170, 230], [250, 350])
-        # pygame.draw.polygon(screen, (255, 255, 255), pts, width=1)
-
-        rob = Robot([200,200], [50, 100, 200])
+        rob.update_joints()
         rob.draw(screen)
 
         pygame.display.update()
         FramePerSec.tick(FPS)
 
 
+@dataclass
+class Movement:
+    target_state: t.Any
+    speeds: np.ndarray
+    last_update: t.Optional[int] = None
+    # XXX for both: number of zeros depends on number of motors
+    move_elapsed: np.ndarray = field(default_factory=lambda: np.array([0.0, 0]))
+    # has to be set the moment the move starts executing, since the
+    # robot joint angles can be anything beforehand
+    move_planned: np.ndarray = field(default_factory=lambda: np.array([0.0, 0]))
+
+
 class Robot:
     def __init__(self, xy_origin, lengths):
-        """
-        Arguments
-        ---------
-        xy_origin:
-            Where is the robot base located?
-        links:
-            List of arms/beams/links lengths
-        """
-
         self.xy_origin = np.array(xy_origin)
         self.lengths = lengths
-        self.joint_angles = [0] * len(self.lengths)
+        self.jangles_rad = np.zeros(len(self.lengths))
+        self.movequeue: t.List[Movement] = []
+
+    def plan_move_to(self, angles_rad, speeds_radps):
+        assert len(angles_rad) == len(self.lengths) == len(self.jangles_rad)
+
+        # single speed will be applied to all joints
+        if isinstance(speeds_radps, float):
+            speeds_radps = np.array([speeds_radps] * len(angles_rad))
+
+        self.movequeue.append(Movement(angles_rad, speeds_radps))
+
+    def update_joints(self):
+        if not self.movequeue:
+            return
+
+        active_move = self.movequeue[0]
+        now = pygame.time.get_ticks()
+
+        # if we haven't worked in this move yet
+        if all(active_move.move_planned == 0):
+            active_move.move_planned = np.abs(
+                active_move.target_state - self.jangles_rad
+            )
+
+        assert len(active_move.move_planned) == len(
+            self.lengths
+        ), f"planned failed {active_move}"
+        assert len(active_move.move_elapsed) == len(
+            self.lengths
+        ), f"elasped failed {active_move}"
+
+        if all(active_move.move_elapsed >= active_move.move_planned):
+            print("popping", active_move)
+            self.movequeue.pop(0)
+            self.jangles_rad = np.array(active_move.target_state)  # cheat
+            return
+
+        if active_move.last_update:
+            where_needmove = active_move.move_elapsed < active_move.move_planned
+            print("where_needmove", where_needmove)
+
+            ticks_passed = now - active_move.last_update
+            secs_passed = ticks_passed / 1000
+            speeds = np.array(active_move.speeds)[where_needmove]
+            move_amount = secs_passed * speeds
+
+            self.jangles_rad[where_needmove] += move_amount
+            active_move.move_elapsed[where_needmove] += np.abs(move_amount)
+
+        active_move.last_update = now
 
     def draw(self, surface):
         xy = self.xy_origin
+        prev_angle = 0
 
-        for joint_angle, joint_len in zip(self.joint_angles, self.lengths):
-            link_vec = np.array([np.cos(joint_angle), np.sin(joint_angle)])
+        for joint_angle, joint_len in zip(self.jangles_rad, self.lengths):
+            link_vec = np.array(
+                [np.cos(joint_angle + prev_angle), np.sin(joint_angle + prev_angle)]
+            )
             next_pt = xy + link_vec * joint_len
 
             armpoly = get_arm_poly(xy, next_pt)
             pygame.draw.polygon(surface, (255, 255, 255), armpoly, width=2)
 
             xy = next_pt
+            prev_angle = joint_angle
 
 
 def get_arm_poly(pt_origin, pt_end):
@@ -83,12 +146,14 @@ def get_arm_poly(pt_origin, pt_end):
     width = 0.2 * length
     stemlen = 0.1 * length
 
-    return np.array([
-        pt_origin,
-        pt_origin + vec_perp * width / 2 + vec_axial * stemlen,
-        pt_end,
-        pt_origin - vec_perp * width / 2 + vec_axial * stemlen,
-    ])
+    return np.array(
+        [
+            pt_origin,
+            pt_origin + vec_perp * width / 2 + vec_axial * stemlen,
+            pt_end,
+            pt_origin - vec_perp * width / 2 + vec_axial * stemlen,
+        ]
+    ).tolist()
 
 
 if __name__ == "__main__":

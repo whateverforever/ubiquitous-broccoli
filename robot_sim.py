@@ -1,4 +1,5 @@
 import sys
+import math
 import typing as t
 from dataclasses import dataclass, field
 
@@ -39,9 +40,11 @@ def main():
                     rob.plan_move_to([0.0, 0], [-2 * np.pi / 10, -2 * np.pi / 5])
                 if event.key == pygame.K_w:
                     print("running random whatever")
+                    sign_a = np.random.choice([-1,1])
+                    sign_b = np.random.choice([-1,1])
                     rob.plan_move_to(
                         np.random.uniform(0, 3.14, size=2),
-                        [-2 * np.pi / 10, -2 * np.pi / 5],
+                        [sign_a * 2 * np.pi / 10, sign_b * 2 * np.pi / 5],
                     )
 
         screen.fill((80, 80, 80))
@@ -91,8 +94,13 @@ class Robot:
 
         # if we haven't worked in this move yet
         if all(active_move.move_planned == 0):
-            active_move.move_planned = np.abs(
-                active_move.target_state - self.jangles_rad
+            planned_move = np.array(active_move.target_state - self.jangles_rad)
+            active_move.move_planned = np.abs(planned_move)
+
+            # if speeds are in opposite direction to target, we need to move much further
+            where_reverse = planned_move * active_move.speeds < 0
+            active_move.move_planned[where_reverse] = (
+                2 * np.pi - active_move.move_planned[where_reverse]
             )
 
         assert len(active_move.move_planned) == len(
@@ -149,7 +157,9 @@ class Robot:
             pygame.draw.aalines(surface, (255, 255, 255), False, self._tips[-6:])
 
         font = pygame.font.SysFont(None, 24)
-        img = font.render(f"Move Queue Len: {len(self.movequeue)}", True, (255, 255, 255))
+        img = font.render(
+            f"Move Queue Len: {len(self.movequeue)}", True, (255, 255, 255)
+        )
         surface.blit(img, (20, 20))
 
 

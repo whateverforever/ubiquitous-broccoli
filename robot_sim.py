@@ -4,17 +4,15 @@ import typing as t
 from dataclasses import dataclass, field
 
 import numpy as np
+from scipy.optimize import minimize
 
 import pygame
-import pygame.gfxdraw
 
-pygame.init()
-vec2 = pygame.math.Vector2
-
-WIDTH = 800
-HEIGHT = 600
+WIDTH = 1280
+HEIGHT = 800
 FPS = 60
 
+pygame.init()
 FramePerSec = pygame.time.Clock()
 
 
@@ -22,10 +20,15 @@ def main():
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("2D Arm Plotter")
 
-    rob = Robot([WIDTH // 2, HEIGHT // 2], [200, 100])
+    robot_xy = [WIDTH // 2, HEIGHT // 2]
+    target = None
+
+    rob = Robot(robot_xy, [200, 100])
     rob.plan_move_to([3.14, 3.14], [2 * np.pi / 10, 2 * np.pi / 5])
 
     while True:
+        screen.fill((80, 80, 80))
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -40,14 +43,37 @@ def main():
                     rob.plan_move_to([0.0, 0], [-2 * np.pi / 10, -2 * np.pi / 5])
                 if event.key == pygame.K_w:
                     print("running random whatever")
-                    sign_a = np.random.choice([-1,1])
-                    sign_b = np.random.choice([-1,1])
+                    sign_a = np.random.choice([-1, 1])
+                    sign_b = np.random.choice([-1, 1])
                     rob.plan_move_to(
-                        np.random.uniform(0, 3.14, size=2),
-                        [sign_a * 2 * np.pi / 10, sign_b * 2 * np.pi / 5],
+                        np.random.uniform(0, 2 * np.pi, size=2),
+                        [sign_a * 2 * np.pi / 10, sign_b * 2 * np.pi],
+                    )
+                if event.key == pygame.K_i:
+                    print("inverse kinematic!")
+
+                    target_th1 = np.random.uniform(0, np.deg2rad(10))
+                    target_th2 = np.random.uniform(0, np.deg2rad(10))
+                    target = rob.get_ee(
+                        jangles_rad=[
+                            rob.jangles_rad[0] + target_th1,
+                            rob.jangles_rad[1] + target_th2,
+                        ]
                     )
 
-        screen.fill((80, 80, 80))
+                    def _cost(x):
+                        xy = rob.get_ee(jangles_rad=x)
+                        return np.linalg.norm(np.subtract(xy, target))
+
+                    res = minimize(_cost, x0=rob.jangles_rad)
+                    target_jangles = res.x
+                    print("res", res)
+
+                    rob.plan_move_to(target_jangles, [np.pi, np.pi])
+
+        if target is not None:
+            pygame.draw.circle(screen, (255, 0, 0), target, 5)
+
         rob.update_joints()
         rob.draw(screen)
 
@@ -77,7 +103,9 @@ class Robot:
         self._tips = []
 
     def plan_move_to(self, angles_rad, speeds_radps):
-        assert len(angles_rad) == len(self.lengths) == len(self.jangles_rad)
+        assert (
+            len(angles_rad) == len(self.lengths) == len(self.jangles_rad)
+        ), f"{angles_rad} vs {self.lengths} vs {self.jangles_rad}"
 
         # single speed will be applied to all joints
         if isinstance(speeds_radps, float):
@@ -161,6 +189,44 @@ class Robot:
             f"Move Queue Len: {len(self.movequeue)}", True, (255, 255, 255)
         )
         surface.blit(img, (20, 20))
+
+    def get_ee(self, xy_origin=None, lengths=None, jangles_rad=None):
+        if xy_origin is None:
+            xy_origin = self.xy_origin
+        if lengths is None:
+            lengths = self.lengths
+        if jangles_rad is None:
+            jangles_rad = self.jangles_rad
+
+        l1 = lengths[0]
+        l2 = lengths[1]
+
+        th1 = jangles_rad[0]
+        th2 = jangles_rad[1]
+
+        x0, y0 = xy_origin
+
+        x1 = x0 + l1 * tcos(th1)
+        y1 = y0 + l1 * tsin(th1)
+
+        x2 = x1 + l2 * tcos(-(th1 + th2))
+        y2 = y1 - l2 * tsin(-(th1 + th2))
+
+        return (x2, y2)
+
+
+def tsin(a, x=None):
+    """Taylor expansion of degree 2 of sin(x) at a"""
+
+    x = x or a
+    return math.sin(a) + math.cos(a) * (x - a) + -math.sin(a) / 2 * (x - a) ** 2
+
+
+def tcos(a, x=None):
+    """Taylor expansion of degree 2 of cos(x) at a"""
+
+    x = x or a
+    return math.cos(a) - math.sin(a) * (x - a) + -math.cos(a) / 2 * (x - a) ** 2
 
 
 def get_arm_poly(pt_origin, pt_end):

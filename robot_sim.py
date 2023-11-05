@@ -4,7 +4,8 @@ import typing as t
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy.optimize import minimize
+
+from scipy.optimize import minimize, check_grad, approx_fprime
 
 import pygame
 
@@ -52,26 +53,58 @@ def main():
                 if event.key == pygame.K_i:
                     print("inverse kinematic!")
 
-                    target_th1 = np.random.uniform(0, np.deg2rad(10))
-                    target_th2 = np.random.uniform(0, np.deg2rad(10))
-                    target = rob.get_ee(
+                    target_th1 = np.random.uniform(-np.deg2rad(10), np.deg2rad(10))
+                    target_th2 = np.random.uniform(-np.deg2rad(10), np.deg2rad(10))
+                    target, _ = rob.get_ee(
                         jangles_rad=[
                             rob.jangles_rad[0] + target_th1,
                             rob.jangles_rad[1] + target_th2,
                         ]
                     )
 
-                    def _cost(x):
-                        xy = rob.get_ee(jangles_rad=x)
-                        return np.linalg.norm(np.subtract(xy, target))
+                    def _test(x, grad=False):
+                        xy, dxy = rob.get_ee(jangles_rad=x)
+                        if grad:
+                            return dxy
+                        return xy
 
-                    res = minimize(_cost, x0=rob.jangles_rad)
+                    x0 = rob.jangles_rad
+                    a = check_grad(lambda x: _test(x, grad=False), lambda x: _test(x, grad=True), x0)
+                    assert a < 0.01
+                    print("Robot gradients check out")
+
+                    def _cost(x):
+                        xy, dxy = rob.get_ee(jangles_rad=x)
+
+                        xy = np.squeeze(xy)
+                        xytarget = np.array(target)
+                        assert xy.shape == xytarget.shape == np.sum(dxy, axis=0).shape
+
+                        # print("dxy\n", dxy)
+                        return (
+                            np.sum((xy - xytarget) ** 2),
+                            ((2 * (xy - xytarget)).reshape(1,2) @ dxy).reshape(-1)
+                        )
+
+                    def _func(x):
+                        return _cost(x)[0]
+
+                    def _grad(x):
+                        return _cost(x)[1]
+
+                    # print("func", _func(x0), "grad", _grad(x0))
+                    # print("cost grad", _grad(x0), approx_fprime(x0, _func))
+                    print("check", check_grad(_func, grad=_grad, x0=x0))
+                    assert check_grad(_func, grad=_grad, x0=x0) < 0.01
+
+                    res = minimize(_cost, x0=x0, jac=True)
                     target_jangles = res.x
-                    print("res", res)
+                    # print("res", res)
 
                     rob.plan_move_to(target_jangles, [np.pi, np.pi])
 
         if target is not None:
+            # print("target", target)
             pygame.draw.circle(screen, (255, 0, 0), target, 5)
 
         rob.update_joints()
@@ -159,7 +192,7 @@ class Robot:
 
             self.jangles_rad[where_needmove] += move_amount
             active_move.move_elapsed[where_needmove] += np.abs(move_amount)
-            print("jangles", self.jangles_rad)
+            # print("jangles", self.jangles_rad)
 
         active_move.last_update = now
 
@@ -191,6 +224,8 @@ class Robot:
         surface.blit(img, (20, 20))
 
     def get_ee(self, xy_origin=None, lengths=None, jangles_rad=None):
+        """Kinematics with forward-mode autodiff derivatives"""
+
         if xy_origin is None:
             xy_origin = self.xy_origin
         if lengths is None:
@@ -204,29 +239,126 @@ class Robot:
         th1 = jangles_rad[0]
         th2 = jangles_rad[1]
 
-        x0, y0 = xy_origin
+        def _x1(th1):
+            x0, y0 = xy_origin
+            x1 = x0 + l1 * math.cos(th1)
+            y1 = y0 + l1 * math.sin(th1)
+            return (x1, y1)
 
-        x1 = x0 + l1 * tcos(th1)
-        y1 = y0 + l1 * tsin(th1)
+        def _x2(x):
+            th1, th2 = x
+            x1, y1 = _x1(th1)
 
-        x2 = x1 + l2 * tcos(-(th1 + th2))
-        y2 = y1 - l2 * tsin(-(th1 + th2))
+            x2 = x1 + l2 * math.cos(-(th1 + th2))
+            y2 = y1 - l2 * math.sin(-(th1 + th2))
+            return (x2, y2)
 
-        return (x2, y2)
+        ### derivatives
+
+        dtsin = lambda x: math.cos(x)
+        dtcos = lambda x: -math.sin(x)
+
+        def _dx1(th1):
+            dx1_dth1 = l1 * dtcos(th1)
+            dy1_dth1 = l1 * dtsin(th1)
+            return [[dx1_dth1], [dy1_dth1]]
+
+        assert check_grad(_x1, _dx1, 0) < 1e-5
+        assert check_grad(_x1, _dx1, np.pi/2) < 1e-5
+        assert check_grad(_x1, _dx1, np.pi/4) < 1e-5
+
+        # def _x2(x):
+        #     th1, th2 = x
+        #     x2 = x1 + l2 * math.cos(-(th1 + th2))
+        #     y2 = y1 - l2 * math.sin(-(th1 + th2))
+        #     return (x2, y2)
+
+        def _dx2(x):
+            th1, th2 = x
+            dx1_dth1, dy1_dth1 = np.squeeze(_dx1(th1))
+            # print("prev grads", dx1_dth1, dy1_dth1)
+
+            dx2_dth1 = dx1_dth1 + l2 * dtcos(-(th1 + th2)) * -1
+            dx2_dth2 =        0 + l2 * dtcos(-(th1 + th2)) * -1
+
+            dy2_dth1 = dy1_dth1 - l2 * dtsin(-(th1 + th2)) * -1
+            dy2_dth2 =        0 - l2 * dtsin(-(th1 + th2)) * -1
+
+            return np.array(
+                [
+                    [dx2_dth1, dx2_dth2],
+                    [dy2_dth1, dy2_dth2],
+                ]
+            )
+
+        # print("J\n", _dx2([0, 0]), "approx\n", approx_fprime([0,0], _x2))
+        # print("------")
+        # print("J\n", _dx2([np.pi/2, np.pi/4]), "approx\n", approx_fprime([np.pi/2, np.pi/4], _x2))
+        assert check_grad(_x2, _dx2, [0, 0]) < 1e-5
+        assert check_grad(_x2, _dx2, [np.pi/2, np.pi/4]) < 1e-5
+        assert check_grad(_x2, _dx2, [np.pi/4, np.pi/2]) < 1e-5
+
+        return _x2([th1, th2]), _dx2([th1, th2])
 
 
 def tsin(a, x=None):
-    """Taylor expansion of degree 2 of sin(x) at a"""
+    """
+    Taylor expansion of degree 2 of sin(x) at a
+
+    >>> xs = np.linspace(-3, 3, 50)
+    >>> np.allclose(np.sin(xs), [tsin(x) for x in xs])
+    True
+
+    # >>> # testing against fixed support
+    # >>> xs = np.linspace(-0.05, 0.05, 50)
+    # >>> np.allclose(np.sin(xs), [tsin(0, x) for x in xs])
+    # True
+    """
 
     x = x or a
     return math.sin(a) + math.cos(a) * (x - a) + -math.sin(a) / 2 * (x - a) ** 2
 
 
 def tcos(a, x=None):
-    """Taylor expansion of degree 2 of cos(x) at a"""
+    """
+    Taylor expansion of degree 2 of cos(x) at a
+
+    >>> xs = np.linspace(-3, 3, 50)
+    >>> np.allclose(np.cos(xs), [tcos(x) for x in xs])
+    True
+
+    >>> # testing against fixed support
+    >>> xs = np.linspace(-0.1, 0.1, 50)
+    >>> np.allclose(np.cos(xs), [tcos(0, x) for x in xs])
+    True
+    """
 
     x = x or a
     return math.cos(a) - math.sin(a) * (x - a) + -math.cos(a) / 2 * (x - a) ** 2
+
+
+def dtsin(a, x=None):
+    """
+    dsin/dx Taylor expansion of degree 2 of sin(x) at a
+
+    >>> check_grad(tsin, dtsin, 0) < 1e-5
+    True
+    """
+
+    x = x or a
+    return math.cos(a) - math.sin(a) / 2 * (2 * x - 2 * a)
+
+
+def dtcos(a, x=None):
+    """
+    dcos/dx Taylor expansion of degree 2 of cos(x) at a
+
+    >>> check_grad(tcos, dtcos, 0) < 1e-5
+    True
+    """
+
+    x = x or a
+    return -math.sin(a) * x - math.cos(a) / 2 * (2 * x - 2 * a)
 
 
 def get_arm_poly(pt_origin, pt_end):
@@ -256,4 +388,11 @@ def get_arm_poly(pt_origin, pt_end):
 
 
 if __name__ == "__main__":
+    import doctest
+
+    nfail, ntested = doctest.testmod()
+    print(f"tested {ntested} functions")
+    assert ntested > 0
+    assert nfail == 0
+
     main()

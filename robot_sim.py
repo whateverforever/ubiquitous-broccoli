@@ -9,8 +9,8 @@ from scipy.optimize import minimize, check_grad, approx_fprime
 
 import pygame
 
-WIDTH = 1280
-HEIGHT = 800
+WIDTH = 800
+HEIGHT = 600
 FPS = 60
 
 pygame.init()
@@ -22,7 +22,7 @@ def main():
     pygame.display.set_caption("2D Arm Plotter")
 
     robot_xy = [WIDTH // 2, HEIGHT // 2]
-    target = None
+    targets = []
 
     rob = Robot(robot_xy, [200, 100])
     rob.plan_move_to([3.14, 3.14], [2 * np.pi / 10, 2 * np.pi / 5])
@@ -35,6 +35,9 @@ def main():
                 pygame.quit()
                 sys.exit()
             if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_c:
+                    print("Clearing trace")
+                    rob._tips = []
                 if event.key == pygame.K_r:
                     print("restarting")
                     rob.plan_move_to([0.0, 0], [2 * np.pi / 10, 2 * np.pi / 5])
@@ -51,60 +54,46 @@ def main():
                         [sign_a * 2 * np.pi / 10, sign_b * 2 * np.pi],
                     )
                 if event.key == pygame.K_i:
-                    print("inverse kinematic!")
+                    xy_origin = rob.xy_origin
+                    l1, l2 = rob.lengths
+                    d = l1 + (l2-l1)/2
 
-                    target_th1 = np.random.uniform(-np.deg2rad(10), np.deg2rad(10))
-                    target_th2 = np.random.uniform(-np.deg2rad(10), np.deg2rad(10))
-                    target, _ = rob.get_ee(
-                        jangles_rad=[
-                            rob.jangles_rad[0] + target_th1,
-                            rob.jangles_rad[1] + target_th2,
-                        ]
-                    )
+                    wp1 = xy_origin + [d, 0]
+                    wp2 = xy_origin + [0, d]
+                    wp3 = xy_origin + [-d, 0]
+                    wp4 = xy_origin + [0, -d]
 
-                    def _test(x, grad=False):
-                        xy, dxy = rob.get_ee(jangles_rad=x)
-                        if grad:
-                            return dxy
-                        return xy
+                    targets = []
+                    for wp in [wp1, wp2, wp3, wp4]:
+                        rob.plan_move_to_xy(wp)
+                        targets.append(wp)
 
-                    x0 = rob.jangles_rad
-                    a = check_grad(lambda x: _test(x, grad=False), lambda x: _test(x, grad=True), x0)
-                    assert a < 0.01
-                    print("Robot gradients check out")
+                if event.key == pygame.K_o:
+                    xy_origin = rob.xy_origin
+                    l1, l2 = rob.lengths
+                    d = l1 + (l2-l1)/2
 
-                    def _cost(x):
-                        xy, dxy = rob.get_ee(jangles_rad=x)
+                    wp1 = xy_origin + [d, 0]
+                    wp2 = xy_origin + [0, d]
+                    wp3 = xy_origin + [-d, 0]
+                    wp4 = xy_origin + [0, -d]
 
-                        xy = np.squeeze(xy)
-                        xytarget = np.array(target)
-                        assert xy.shape == xytarget.shape == np.sum(dxy, axis=0).shape
+                    targets = []
+                    prev = None
+                    for wp in [wp1, wp2, wp3, wp4, wp1]:
+                        if prev is not None:
+                            xs = np.linspace(prev[0], wp[0], 5)
+                            ys = np.linspace(prev[1], wp[1], 5)
+                        else:
+                            xs = [wp[0]]
+                            ys = [wp[1]]
 
-                        # print("dxy\n", dxy)
-                        return (
-                            np.sum((xy - xytarget) ** 2),
-                            ((2 * (xy - xytarget)).reshape(1,2) @ dxy).reshape(-1)
-                        )
+                        for wp in zip(xs, ys):
+                            prev = wp
+                            rob.plan_move_to_xy(wp)
+                            targets.append(wp)
 
-                    def _func(x):
-                        return _cost(x)[0]
-
-                    def _grad(x):
-                        return _cost(x)[1]
-
-                    # print("func", _func(x0), "grad", _grad(x0))
-                    # print("cost grad", _grad(x0), approx_fprime(x0, _func))
-                    print("check", check_grad(_func, grad=_grad, x0=x0))
-                    assert check_grad(_func, grad=_grad, x0=x0) < 0.01
-
-                    res = minimize(_cost, x0=x0, jac=True)
-                    target_jangles = res.x
-                    # print("res", res)
-
-                    rob.plan_move_to(target_jangles, [np.pi, np.pi])
-
-        if target is not None:
-            # print("target", target)
+        for target in targets:
             pygame.draw.circle(screen, (255, 0, 0), target, 5)
 
         rob.update_joints()
@@ -117,7 +106,7 @@ def main():
 @dataclass
 class Movement:
     target_state: t.Any
-    speeds: np.ndarray
+    speeds: t.Optional[np.ndarray] = None
     last_update: t.Optional[int] = None
     # XXX for both: number of zeros depends on number of motors
     move_elapsed: np.ndarray = field(default_factory=lambda: np.array([0.0, 0]))
@@ -135,7 +124,12 @@ class Robot:
 
         self._tips = []
 
-    def plan_move_to(self, angles_rad, speeds_radps):
+    def plan_move_to(self, angles_rad, speeds_radps=None):
+        """
+        Enqueues a new joint-space move. Positive speeds are clockwise, negative ccw.
+        Leaving out speeds will compute optimal directions with default speed.
+        """
+
         assert (
             len(angles_rad) == len(self.lengths) == len(self.jangles_rad)
         ), f"{angles_rad} vs {self.lengths} vs {self.jangles_rad}"
@@ -146,6 +140,31 @@ class Robot:
 
         self.movequeue.append(Movement(angles_rad, speeds_radps))
 
+    def plan_move_to_xy(self, target_xy):
+        """
+        Same as plan_move_to, but in cartesian space, not joint space
+        """
+
+        def _cost(x):
+            xy, dxy = self.get_ee(jangles_rad=x)
+
+            xy = np.squeeze(xy)
+            xytarget = np.array(target_xy)
+            assert xy.shape == xytarget.shape == np.sum(dxy, axis=0).shape
+
+            return (
+                np.sum((xy - xytarget) ** 2),
+                ((2 * (xy - xytarget)).reshape(1,2) @ dxy).reshape(-1)
+            )
+
+        x0 = self.jangles_rad
+        assert check_grad(lambda x: _cost(x)[0], grad=lambda x: _cost(x)[1], x0=x0) < 0.01
+
+        res = minimize(_cost, x0=x0, jac=True)
+        target_jangles = res.x
+
+        self.plan_move_to(target_jangles)
+
     def update_joints(self):
         if not self.movequeue:
             return
@@ -153,10 +172,16 @@ class Robot:
         active_move = self.movequeue[0]
         now = pygame.time.get_ticks()
 
-        # if we haven't worked in this move yet
+        # if we haven't worked on this move yet
         if all(active_move.move_planned == 0):
             planned_move = np.array(active_move.target_state - self.jangles_rad)
             active_move.move_planned = np.abs(planned_move)
+
+            # If the move has no specified speeds, we choose the optimal direction
+            if active_move.speeds is None:
+                active_move.speeds = np.ones(len(active_move.target_state)) * np.pi / 5
+                diffs = (active_move.target_state - self.jangles_rad) % (2*np.pi)
+                active_move.speeds[diffs > np.pi] *= -1
 
             # if speeds are in opposite direction to target, we need to move much further
             where_reverse = planned_move * active_move.speeds < 0

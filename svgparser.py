@@ -14,13 +14,59 @@ pencil = "m 30.34297,102.46427 c -8.96321,27.54839 14.694175,44.21679 39.012712,
 blob = "M 117.98199,88.093218 C 106.37732,85.094761 94.305619,83.56692 82.430085,82.115466 78.895997,81.68352 65.865631,80.447146 61.979873,81.17161 c -6.00977,1.120465 -19.44383,9.903986 -23.596399,14.157838 -2.060731,2.110991 -6.107999,9.086222 -6.921611,12.584742 -3.542456,15.23256 4.14642,30.6444 13.528603,42.1589 6.061012,7.43852 17.072788,11.28236 25.484109,14.78708 18.693399,7.78891 38.133555,14.00012 58.204445,16.98941 13.83405,2.06039 14.37939,1.57309 28.00106,1.57309 12.78701,0 16.99972,0.36478 24.85488,-11.01166 4.40092,-6.37375 3.65174,-15.67004 3.77542,-22.96716 0.0987,-5.82212 0.30059,-14.13498 -1.25848,-19.82097 -3.7142,-13.54593 -14.69204,-22.98662 -22.96716,-33.664195 -3.71665,-4.795681 -4.26497,-6.621576 -8.80932,-10.382414 -4.13217,-3.419729 -17.46635,-10.790417 -24.22563,-9.43856 -2.04839,0.409678 -4.46037,7.29193 -5.66314,8.494704 -1.53011,1.530112 -2.61156,2.564255 -4.40466,3.460803 z"
 source = penis
 
-rex_cmd = r"[a-zA-Z]\s(-?\d+\.?\d*,-?\d+\.?\d*\s*)+"
+rex_cmd = r"[a-zA-Z]\s(-?\d+\.?\d*,-?\d+\.?\d*\s*)*"
 
 
 @dataclass
 class PathCommand:
     cmd: str
     coords: Sequence[Tuple[float, float]]
+
+
+def bezier_quad(start, end, control_pt1):
+    p0 = np.array(start)
+    p1 = np.array(control_pt1)
+    p2 = np.array(end)
+
+    assert len(p0) == 2
+    assert len(p1) == 2
+    assert len(p2) == 2
+
+    def _spline_time(t):
+        return (
+            p1 + (1-t)**2*(p0-p1)+t**2*(p2-p1)
+        )
+
+    def _spline_dt(t):
+        return np.reshape(
+            2*(1-t)*(p1-p0)+2*t*(p2-p1),
+            (-1,1)
+        )
+
+    # sanity check that wikipedia gradients are correct
+    err = check_grad(_spline_time, _spline_dt, 0)
+    assert err < 1e-5, f"err={err:.2f}"
+    err = check_grad(_spline_time, _spline_dt, 0.5)
+    assert err < 1e-5, f"err={err:.2f}"
+    err = check_grad(_spline_time, _spline_dt, 1)
+    assert err < 1e-5, f"err={err:.2f}"
+
+    # For arc-length parameterization, we build a reverse lookup table to
+    # interpolate from, to get t(s)
+    ts = []
+    ss = []
+    for t in np.linspace(0, 1, 100):
+        s, err = quad(lambda x: np.linalg.norm(_spline_dt(x)), 0, t)
+        assert err < 1e-5, f"integration got large error {err}"
+        ss.append(s)
+        ts.append(t)
+
+    def _spline_arc(s):
+        t = np.interp(s, ss, ts)
+        return _spline_time(t)
+
+    arc_length = ss[-1]
+    return arc_length, _spline_arc
 
 
 def bezier_cubic(start, end, control_pt1, control_pt2):
@@ -79,28 +125,37 @@ def bezier_cubic(start, end, control_pt1, control_pt2):
 def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
     cursor = [0.0, 0.0]
     segments = []
+    start_subpath = cursor
 
     for cmd in cmds:
         print("Executing command", cmd)
 
         if cmd.cmd == "m":
             # relative move
-            assert len(cmd.coords) == 1
-            cursor[0] += cmd.coords[0][0]
-            cursor[1] += cmd.coords[0][1]
+            # assert len(cmd.coords) == 1
+            first = True
+            for coords in cmd.coords:
+                cursor[0] += coords[0]
+                cursor[1] += coords[1]
+                if first:
+                    start_subpath = cursor.copy()
+                    first = False
         elif cmd.cmd == "M":
             # absolute move
             assert len(cmd.coords) == 1
             cursor[0] = cmd.coords[0][0]
             cursor[1] = cmd.coords[0][1]
+            start_subpath = cursor.copy()
+        elif cmd.cmd == "z":
+            segments.append([cursor.copy(), start_subpath.copy()])
+            cursor = start_subpath.copy()
         elif cmd.cmd in ["c", "C"]:
-            is_relative = cmd.cmd == "c"
-
-            # relative cubic bezier
+            # cubic bezier
             assert (
                 len(cmd.coords) % 3 == 0
             ), "Expected cubic path to have multiple of 3 coordinates!"
 
+            is_relative = cmd.cmd == "c"
             for i in range(0, len(cmd.coords) - 2, 3):
                 prevpt = np.array(cursor) if is_relative else np.array([0, 0])
                 tipa = prevpt + cmd.coords[i]
@@ -108,6 +163,30 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
                 nextpt = prevpt + cmd.coords[i + 2]
 
                 alen, b = bezier_cubic(np.array(cursor), nextpt, tipa, tipb)
+                if not spline_step:
+                    spline_step = alen / 20
+
+                asses = np.linspace(0, alen, int(alen // spline_step))
+                if not len(asses):
+                    # how does this happen?
+                    continue
+                pts = np.array([b(s) for s in asses])
+                # plt.plot(pts[:, 0], pts[:, 1], "-x")
+                segments.append(pts)
+                cursor = nextpt
+        elif cmd.cmd in ["q", "Q"]:
+            # quad bezier
+            assert (
+                len(cmd.coords) % 2 == 0
+            ), "Expected cubic path to have multiple of 2 coordinates!"
+
+            is_relative = cmd.cmd.islower()
+            for i in range(0, len(cmd.coords) - 1, 2):
+                prevpt = np.array(cursor) if is_relative else np.array([0, 0])
+                tipa = prevpt + cmd.coords[i]
+                nextpt = prevpt + cmd.coords[i + 1]
+
+                alen, b = bezier_quad(np.array(cursor), nextpt, tipa)
                 if not spline_step:
                     spline_step = alen / 20
 
@@ -135,10 +214,8 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
             xs = [cursor[0]]
             ys = [cursor[1]]
             for coord in cmd.coords:
-                cursor[0] = coord[0]
-                cursor[1] = coord[1]
-                xs.append(cursor[0])
-                ys.append(cursor[1])
+                xs.append(coord[0])
+                ys.append(coord[1])
             # plt.plot(xs, ys)
             segments.append(list(zip(xs, ys)))
         else:

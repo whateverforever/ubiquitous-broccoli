@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from typing import List, Sequence, Tuple
+from typing import List, Sequence, Tuple, Union
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -16,11 +16,19 @@ source = penis
 
 rex_cmd = r"[a-zA-Z]\s(-?\d+\.?\d*,-?\d+\.?\d*\s*)*"
 
+Point2 = Union[np.ndarray, Sequence[float]]
+
 
 @dataclass
 class PathCommand:
     cmd: str
     coords: Sequence[Tuple[float, float]]
+
+
+@dataclass
+class Segment:
+    pts: Sequence[Point2]
+    drawing: bool = True
 
 
 def bezier_quad(start, end, control_pt1):
@@ -33,15 +41,10 @@ def bezier_quad(start, end, control_pt1):
     assert len(p2) == 2
 
     def _spline_time(t):
-        return (
-            p1 + (1-t)**2*(p0-p1)+t**2*(p2-p1)
-        )
+        return p1 + (1 - t) ** 2 * (p0 - p1) + t**2 * (p2 - p1)
 
     def _spline_dt(t):
-        return np.reshape(
-            2*(1-t)*(p1-p0)+2*t*(p2-p1),
-            (-1,1)
-        )
+        return np.reshape(2 * (1 - t) * (p1 - p0) + 2 * t * (p2 - p1), (-1, 1))
 
     # sanity check that wikipedia gradients are correct
     err = check_grad(_spline_time, _spline_dt, 0)
@@ -135,19 +138,26 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
             # assert len(cmd.coords) == 1
             first = True
             for coords in cmd.coords:
+                cursor_old = cursor.copy()
+
                 cursor[0] += coords[0]
                 cursor[1] += coords[1]
+
+                segments.append(Segment([cursor_old, cursor], drawing=False))
+
                 if first:
                     start_subpath = cursor.copy()
                     first = False
         elif cmd.cmd == "M":
             # absolute move
             assert len(cmd.coords) == 1
+            cursor_old = cursor.copy()
             cursor[0] = cmd.coords[0][0]
             cursor[1] = cmd.coords[0][1]
+            segments.append(Segment([cursor_old, cursor_old], drawing=False))
             start_subpath = cursor.copy()
         elif cmd.cmd == "z":
-            segments.append([cursor.copy(), start_subpath.copy()])
+            segments.append(Segment([cursor.copy(), start_subpath.copy()]))
             cursor = start_subpath.copy()
         elif cmd.cmd in ["c", "C"]:
             # cubic bezier
@@ -172,7 +182,7 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
                     continue
                 pts = np.array([b(s) for s in asses])
                 # plt.plot(pts[:, 0], pts[:, 1], "-x")
-                segments.append(pts)
+                segments.append(Segment(pts))
                 cursor = nextpt
         elif cmd.cmd in ["q", "Q"]:
             # quad bezier
@@ -196,7 +206,7 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
                     continue
                 pts = np.array([b(s) for s in asses])
                 # plt.plot(pts[:, 0], pts[:, 1], "-x")
-                segments.append(pts)
+                segments.append(Segment(pts))
                 cursor = nextpt
         elif cmd.cmd == "l":
             # relative polyline
@@ -208,7 +218,7 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
                 xs.append(cursor[0])
                 ys.append(cursor[1])
             # plt.plot(xs, ys)
-            segments.append(list(zip(xs, ys)))
+            segments.append(Segment(list(zip(xs, ys))))
         elif cmd.cmd == "L":
             # absolute polyline
             xs = [cursor[0]]
@@ -217,7 +227,7 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
                 xs.append(coord[0])
                 ys.append(coord[1])
             # plt.plot(xs, ys)
-            segments.append(list(zip(xs, ys)))
+            segments.append(Segment(list(zip(xs, ys))))
         else:
             raise NotImplementedError(f"Unknown command {cmd.cmd}")
 
@@ -234,11 +244,14 @@ def parse_path(source):
         cmds.append(PathCommand(cmd=cmd, coords=coords))
     return cmds
 
+
 def main():
     cmds = parse_path(source)
     segments = discretize_path(cmds)
     for seg in segments:
-        seg = np.array(seg)
+        if not seg.drawing:
+            continue
+        seg = np.array(seg.pts)
         plt.plot(seg[:, 0], seg[:, 1], "-x")
     plt.axis("scaled")
     plt.gca().invert_yaxis()
@@ -247,5 +260,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

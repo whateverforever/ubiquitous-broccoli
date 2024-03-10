@@ -130,6 +130,7 @@ def draw_segments(segs):
         for startp, endp in zip(seg.pts[:-1], seg.pts[1:]):
             startp = np.array(startp) - origin
             endp = np.array(endp) - origin
+            # Make line slightly thicker to account for different antialiasing
             cv2.line(mask, startp.astype(int), endp.astype(int), (255, 255, 255), 2)
 
     return mask

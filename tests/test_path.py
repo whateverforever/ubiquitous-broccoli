@@ -1,3 +1,4 @@
+import re
 import os.path as osp
 
 import numpy as np
@@ -8,7 +9,7 @@ import svgparser
 import pytest
 from pytest import approx
 
-DEBUG = True
+DEBUG = False
 TDIR = osp.dirname(__file__)
 getfile = lambda *x: osp.join(TDIR, *x)
 
@@ -63,6 +64,37 @@ expected = {
         "text.png",
     ),
 }
+
+
+def test_regex():
+    src = "m -118.56674,427.38115 0.49637,-4.27875 3.32793,0.38608 q 7.53875,0.87455 9.37849,-0.15099 1.91552,-1.08556 2.38826,-5.16056"
+    expected = [
+        svgparser.PathCommand(
+            "m", [(-118.56674, 427.38115), (0.49637, -4.27875), (3.32793, 0.38608)]
+        ),
+        svgparser.PathCommand(
+            "q",
+            [
+                (7.53875, 0.87455),
+                (9.37849, -0.15099),
+                (1.91552, -1.08556),
+                (2.38826, -5.16056),
+            ],
+        ),
+    ]
+    res = svgparser.parse_path(src)
+    assert res == expected
+
+    src = "M 63.960938 60.984375 C 63.974368 61.367094 64.441385 61.392249 64.711114 61.515528"
+    expected = [
+        svgparser.PathCommand("M", [(63.960938, 60.984375)]),
+        svgparser.PathCommand(
+            "C",
+            [(63.974368, 61.367094), (64.441385, 61.392249), (64.711114, 61.515528)],
+        ),
+    ]
+    res = svgparser.parse_path(src)
+    assert res == expected
 
 
 @pytest.mark.parametrize("subject", list(expected.keys()))

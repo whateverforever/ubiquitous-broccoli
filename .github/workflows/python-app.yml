@@ -1,4 +1,4 @@
-name: Python application
+name: Test SVG Parsing
 
 on:
   push:
@@ -6,17 +6,15 @@ on:
   pull_request:
     branches: [ "master" ]
 
-permissions:
-  contents: read
+# permissions:
+#   contents: read
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-python@v3
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v4
       with:
         python-version: "3.10"
     - run: |
@@ -24,4 +22,4 @@ jobs:
         # opencv only used for testing
         pip install pytest opencv-python
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    - run: pytest tests
+    - run: python3 -m pytest -v tests

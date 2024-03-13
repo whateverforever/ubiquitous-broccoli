@@ -1,0 +1,4 @@
+# replace with setup.py / pyproject, and pin in here
+numpy
+matplotlib
+scipy

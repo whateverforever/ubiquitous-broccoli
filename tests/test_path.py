@@ -9,7 +9,7 @@ import svgparser
 import pytest
 from pytest import approx
 
-DEBUG = False
+DEBUG = True
 TDIR = osp.dirname(__file__)
 getfile = lambda *x: osp.join(TDIR, *x)
 
@@ -116,7 +116,7 @@ def test_parsing():
 
 
 @pytest.mark.parametrize("subject", list(expected.keys()))
-def test_cubic(subject):
+def test_path_geometry(subject):
     path, n_cmds, keypts, filename = expected[subject]
 
     cmds = svgparser.parse_path(path)
@@ -130,6 +130,26 @@ def test_cubic(subject):
     mask = draw_segments(segs)
     img = cv2.imread(getfile(filename), cv2.IMREAD_GRAYSCALE)
 
+    _test_rendering_matches(mask, img)
+
+
+def test_path_hatch():
+    src = "M 178.91787,36.739211 359.58365,217.405 178.91787,398.07078 -1.7479181,217.405 Z"
+    cmds = svgparser.parse_path(src)
+    segs = svgparser.discretize_path(cmds)
+    segs = svgparser.hatch_path(segs, [0, 0], [0, 1], 50)
+
+    mask = draw_segments(segs)
+    img = cv2.imread(getfile("hatch.png"), cv2.IMREAD_GRAYSCALE)
+
+    _test_rendering_matches(mask, img)
+
+
+################################################################################
+### test helper funs
+
+
+def _test_rendering_matches(mask, img):
     if DEBUG:
         print(f"shapes mask={mask.shape}, expected={img.shape}")
         cv2.imshow("rendered", mask)
@@ -163,10 +183,6 @@ def test_cubic(subject):
     num_expected = np.count_nonzero(img)
     num_found = np.count_nonzero(mask_dil[img > 0])
     assert num_found / num_expected == approx(1.0, abs=0.01)
-
-
-################################################################################
-### test helper funs
 
 
 def draw_segments(segs):

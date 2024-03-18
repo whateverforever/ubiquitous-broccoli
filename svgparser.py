@@ -87,6 +87,15 @@ class BinaryBVH:
         pass
 
     @staticmethod
+    def subtree_contains(subtree, location):
+        center, radius, _, _ = subtree
+        return np.dot(center - location, center - location) <= radius**2
+
+    @staticmethod
+    def subtree_intersect(subtree, ray_start, ray_dir):
+        pass
+
+    @staticmethod
     def build_tree(segments: Collection[Segment], split_dim=0):
         for seg in segments:
             assert isinstance(seg, Segment)

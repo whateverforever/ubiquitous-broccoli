@@ -155,6 +155,10 @@ def test_bvh():
     # mask = render_segments(segs, random_color=True)
     # cv2.imshow("mask", mask)
     # cv2.waitKey(0)
+    subtree = [np.array([0, 0]), 50, None, None]
+    assert svgparser.BinaryBVH.subtree_contains(subtree, (0, 0))
+    assert svgparser.BinaryBVH.subtree_contains(subtree, (0, 50))
+    assert svgparser.BinaryBVH.subtree_contains(subtree, (50, 0))
 
     tree = svgparser.BinaryBVH.build_tree(segs)
     assert len(tree) == 4

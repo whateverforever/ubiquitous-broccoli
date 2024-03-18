@@ -149,16 +149,30 @@ def test_bvh():
     segs = [
         svgparser.Segment([[0, 0], [0, 100]]),
         svgparser.Segment([[50, 0], [50, 100]]),
+        svgparser.Segment([[50, 100], [50, 150]]),
     ]
-    bvh = svgparser.BinaryBVH(segs)
 
-    intersections, debug = bvh.get_intersections([-1, 50], [1, 0], debug=True)
-    assert len(intersections) == 2
-    
-
-    mask = render_segments(segs)
+    mask = render_segments(segs, random_color=True)
     cv2.imshow("mask", mask)
     cv2.waitKey(0)
+
+    tree = svgparser.BinaryBVH.build_tree(segs)
+    assert len(tree) == 4
+    center, radius, childs_left, childs_right = tree
+    assert isinstance(childs_left, svgparser.Segment)
+    assert np.allclose(center, [25, 75])
+    assert radius == approx(np.sqrt(50**2 + 150**2) / 2)
+    assert len(childs_right) == 4
+
+    center, radius, childs_left, childs_righ = childs_right
+    assert np.allclose(center, [50, 75])
+    assert radius == approx(75)
+    assert isinstance(childs_left, svgparser.Segment)
+    assert isinstance(childs_righ, svgparser.Segment)
+
+    # bvh = svgparser.BinaryBVH(segs)
+    # intersections, debug = bvh.get_intersections([-1, 50], [1, 0], debug=True)
+    # assert len(intersections) == 2
 
 
 ################################################################################
@@ -201,12 +215,12 @@ def _test_rendering_matches(mask, img):
     assert num_found / num_expected == approx(1.0, abs=0.01)
 
 
-def render_segments(segs):
+def render_segments(segs, random_color=False):
     segs = segs.copy()
 
     seg_pts = np.array([pt for seg in segs if seg.drawing for pt in seg.pts]).round(2)
     dims = (np.max(seg_pts, axis=0) - np.min(seg_pts, axis=0)).round().astype(int)
-    mask = np.zeros(dims[::-1])
+    mask = np.zeros([*dims[::-1], 3], dtype=np.uint8)
 
     origin = np.min(seg_pts, axis=0)
     for seg in segs:
@@ -216,7 +230,13 @@ def render_segments(segs):
         for startp, endp in zip(seg.pts[:-1], seg.pts[1:]):
             startp = np.array(startp) - origin
             endp = np.array(endp) - origin
+
+            color = (255, 255, 255)
+            if random_color:
+                color = tuple(np.random.randint(100, 255, size=3).tolist())
+                print("color", color)
+
             # Make line slightly thicker to account for different antialiasing
-            cv2.line(mask, startp.astype(int), endp.astype(int), (255, 255, 255), 2)
+            cv2.line(mask, startp.astype(int), endp.astype(int), color, 2)
 
     return mask

@@ -74,13 +74,52 @@ class Segment:
         maxs = np.max(self.pts, axis=0)
         return mins, maxs
 
+    def median(self):
+        return np.median(self.pts, axis=0)
+
 
 class BinaryBVH:
     def __init__(self, segments: Collection[Segment]):
         self._segments = segments
+        self._tree = self.build_tree(self._segments)
 
     def get_intersections(self, ray_start, ray_dir, debug=False):
         pass
+
+    @staticmethod
+    def build_tree(segments: Collection[Segment], split_dim=0):
+        for seg in segments:
+            assert isinstance(seg, Segment)
+        nodes = []
+
+        mini, maxi = get_segments_bb(segments)
+        dims = maxi - mini
+        center = mini + dims / 2
+        radius = np.linalg.norm(dims) / 2
+
+        segment_locs = np.array([seg.median()[split_dim] for seg in segments])
+        where_left = segment_locs < center[split_dim]
+        where_righ = segment_locs >= center[split_dim]
+
+        next_split = 1 if split_dim == 0 else 1
+        segments_left = [seg for i, seg in enumerate(segments) if where_left[i]]
+        segments_righ = [seg for i, seg in enumerate(segments) if where_righ[i]]
+        print("segs left", segments_left)
+        print("segs righ", segments_righ)
+
+        if len(segments_left) > 1:
+            print("going deeper left")
+            subtree_left = BinaryBVH.build_tree(segments_left, split_dim=next_split)
+        else:
+            subtree_left = segments_left[0]
+
+        if len(segments_righ) > 1:
+            print("going deeper right")
+            subtree_righ = BinaryBVH.build_tree(segments_righ, split_dim=next_split)
+        else:
+            subtree_righ = segments_righ[0]
+
+        return (center, radius, subtree_left, subtree_righ)
 
 
 def bezier_quad(start, end, control_pt1, arc_len=True):
@@ -307,16 +346,20 @@ def parse_path(source):
     return cmds
 
 
+def get_segments_bb(segments: Collection[Segment]):
+    mins, maxs = zip(*[seg.bb() for seg in segments if seg.drawing])
+    mini = np.min(mins, axis=0)
+    maxi = np.max(maxs, axis=0)
+    return mini, maxi
+
+
 def hatch_path(
     segments: Collection[Segment],
     hatch_start_xy=None,
     hatch_dir=None,
     hatch_dist=None,
 ):
-    mins, maxs = zip(*[seg.bb() for seg in segments if seg.drawing])
-    # XXX add padding
-    mini = np.min(mins, axis=0)
-    maxi = np.max(maxs, axis=0)
+    mini, maxi = get_segments_bb(segments)
     dims = maxi - mini
 
     hatch_dir = np.array(hatch_dir, dtype=float)

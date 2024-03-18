@@ -127,7 +127,7 @@ def test_path_geometry(subject):
     assert all(kpt in seg_pts for kpt in keypts)
 
     ## Now test overall appearance
-    mask = draw_segments(segs)
+    mask = render_segments(segs)
     img = cv2.imread(getfile(filename), cv2.IMREAD_GRAYSCALE)
 
     _test_rendering_matches(mask, img)
@@ -139,10 +139,26 @@ def test_path_hatch():
     segs = svgparser.discretize_path(cmds)
     segs = svgparser.hatch_path(segs, [0, 0], [1, 0], 50)
 
-    mask = draw_segments(segs)
+    mask = render_segments(segs)
     img = cv2.imread(getfile("hatch.png"), cv2.IMREAD_GRAYSCALE)
 
     _test_rendering_matches(mask, img)
+
+
+def test_bvh():
+    segs = [
+        svgparser.Segment([[0, 0], [0, 100]]),
+        svgparser.Segment([[50, 0], [50, 100]]),
+    ]
+    bvh = svgparser.BinaryBVH(segs)
+
+    intersections, debug = bvh.get_intersections([-1, 50], [1, 0], debug=True)
+    assert len(intersections) == 2
+    
+
+    mask = render_segments(segs)
+    cv2.imshow("mask", mask)
+    cv2.waitKey(0)
 
 
 ################################################################################
@@ -185,7 +201,7 @@ def _test_rendering_matches(mask, img):
     assert num_found / num_expected == approx(1.0, abs=0.01)
 
 
-def draw_segments(segs):
+def render_segments(segs):
     segs = segs.copy()
 
     seg_pts = np.array([pt for seg in segs if seg.drawing for pt in seg.pts]).round(2)

@@ -75,6 +75,14 @@ class Segment:
         return mins, maxs
 
 
+class BinaryBVH:
+    def __init__(self, segments: Collection[Segment]):
+        self._segments = segments
+
+    def get_intersections(self, ray_start, ray_dir, debug=False):
+        pass
+
+
 def bezier_quad(start, end, control_pt1, arc_len=True):
     p0, p1, p2 = start, control_pt1, end
     assert len(p0) == len(p1) == len(p2) == 2

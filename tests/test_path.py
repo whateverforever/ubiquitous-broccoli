@@ -152,9 +152,9 @@ def test_bvh():
         svgparser.Segment([[50, 100], [50, 150]]),
     ]
 
-    mask = render_segments(segs, random_color=True)
-    cv2.imshow("mask", mask)
-    cv2.waitKey(0)
+    # mask = render_segments(segs, random_color=True)
+    # cv2.imshow("mask", mask)
+    # cv2.waitKey(0)
 
     tree = svgparser.BinaryBVH.build_tree(segs)
     assert len(tree) == 4
@@ -170,9 +170,9 @@ def test_bvh():
     assert isinstance(childs_left, svgparser.Segment)
     assert isinstance(childs_righ, svgparser.Segment)
 
-    # bvh = svgparser.BinaryBVH(segs)
-    # intersections, debug = bvh.get_intersections([-1, 50], [1, 0], debug=True)
-    # assert len(intersections) == 2
+    bvh = svgparser.BinaryBVH(segs)
+    intersections, debug = bvh.get_intersections([-1, 50], [1, 0], debug=True)
+    assert len(intersections) == 2
 
 
 ################################################################################

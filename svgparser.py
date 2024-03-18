@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from typing import List, Sequence, Tuple, Union
+from typing import List, Sequence, Tuple, Union, Collection
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -45,6 +45,11 @@ class PathCommand:
 class Segment:
     pts: Sequence[Point2]
     drawing: bool = True
+
+    def bb(self):
+        mins = np.min(self.pts, axis=0)
+        maxs = np.max(self.pts, axis=0)
+        return mins, maxs
 
 
 def bezier_quad(start, end, control_pt1, arc_len=True):
@@ -271,7 +276,36 @@ def parse_path(source):
     return cmds
 
 
-def hatch_path(segments, hatch_start_xy=None, hatch_normal=None, hatch_dist=None):
+def hatch_path(
+    segments: Collection[Segment],
+    hatch_start_xy=None,
+    hatch_dir=None,
+    hatch_dist=None,
+):
+    mins, maxs = zip(*[seg.bb() for seg in segments if seg.drawing])
+    # XXX add padding
+    mini = np.min(mins, axis=0)
+    maxi = np.max(maxs, axis=0)
+    dims = maxi - mini
+
+    hatch_dir = np.array(hatch_dir, dtype=float)
+    hatch_dir /= np.linalg.norm(hatch_dir)
+    if np.dot(hatch_dir, [1, 1]) < 0:
+        hatch_dir *= -1
+
+    dx, dy = hatch_dir
+    hatch_normal = np.array([dy, -dx])
+    if np.dot(hatch_normal, [1, 1]) < 0:
+        hatch_normal *= -1
+
+    diag = np.dot(dims, hatch_normal)
+    nsteps = round(diag / hatch_dist)
+
+    for k in range(nsteps):
+        anchor = mini + k * hatch_dist * hatch_normal
+        other = anchor + np.dot(dims, hatch_dir) * hatch_dir
+        segments.append(Segment([anchor, other]))
+
     return segments
 
 

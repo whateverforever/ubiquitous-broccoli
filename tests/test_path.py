@@ -137,7 +137,7 @@ def test_path_hatch():
     src = "M 178.91787,36.739211 359.58365,217.405 178.91787,398.07078 -1.7479181,217.405 Z"
     cmds = svgparser.parse_path(src)
     segs = svgparser.discretize_path(cmds)
-    segs = svgparser.hatch_path(segs, [0, 0], [0, 1], 50)
+    segs = svgparser.hatch_path(segs, [0, 0], [1, 0], 50)
 
     mask = draw_segments(segs)
     img = cv2.imread(getfile("hatch.png"), cv2.IMREAD_GRAYSCALE)

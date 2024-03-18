@@ -30,6 +30,29 @@ rex_cmd = r"[a-zA-Z]\s?(-?\d+\.?\d*[, ]-?\d+\.?\d*\s*)*"
 Point2 = Union[np.ndarray, Sequence[float]]
 
 
+def main():
+    cmds = parse_path(source)
+    segments = discretize_path(cmds)
+
+    csv = []
+    for seg in segments:
+        pts = np.array(seg.pts)
+        if not seg.drawing:
+            csv.append(f"{','.join(str(w) for w in pts[-1].round(2))},false\n")
+            continue
+
+        for pt in pts[:-1]:
+            csv.append(f"{','.join(str(w) for w in pt.round(2))},true\n")
+        plt.plot(pts[:, 0], pts[:, 1], "-x", c="gray")
+
+    plt.axis("scaled")
+    plt.gca().invert_yaxis()
+    plt.show()
+
+    with open("out.csv", "w") as fh:
+        fh.writelines(csv)
+
+
 @dataclass
 class PathCommand:
     cmd: str
@@ -307,29 +330,6 @@ def hatch_path(
         segments.append(Segment([anchor, other]))
 
     return segments
-
-
-def main():
-    cmds = parse_path(source)
-    segments = discretize_path(cmds)
-
-    csv = []
-    for seg in segments:
-        pts = np.array(seg.pts)
-        if not seg.drawing:
-            csv.append(f"{','.join(str(w) for w in pts[-1].round(2))},false\n")
-            continue
-
-        for pt in pts[:-1]:
-            csv.append(f"{','.join(str(w) for w in pt.round(2))},true\n")
-        plt.plot(pts[:, 0], pts[:, 1], "-x", c="gray")
-
-    plt.axis("scaled")
-    plt.gca().invert_yaxis()
-    plt.show()
-
-    with open("out.csv", "w") as fh:
-        fh.writelines(csv)
 
 
 if __name__ == "__main__":

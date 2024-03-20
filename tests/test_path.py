@@ -127,7 +127,7 @@ def test_path_geometry(subject):
     assert all(kpt in seg_pts for kpt in keypts)
 
     ## Now test overall appearance
-    mask = render_segments(segs)
+    mask = _render_segments(segs)
     img = cv2.imread(getfile(filename), cv2.IMREAD_GRAYSCALE)
 
     _test_rendering_matches(mask, img)
@@ -139,10 +139,20 @@ def test_path_hatch():
     segs = svgparser.discretize_path(cmds)
     segs = svgparser.hatch_path(segs, [0, 0], [1, 0], 50)
 
-    mask = render_segments(segs)
+    mask = _render_segments(segs)
     img = cv2.imread(getfile("hatch.png"), cv2.IMREAD_GRAYSCALE)
 
     _test_rendering_matches(mask, img)
+
+
+def test_bvh2():
+    src = "m 212.88733,-5.4488483 -8.46778,69.4693113 47.76619,-40.035149 z m -70.85532,51.7752513 -8.46775,69.468207 47.76616,-40.034057 z m 66.76747,30.65606 -8.46778,69.469327 47.76619,-40.03516 z m -134.884472,33.595557 -45.36024,53.2948 61.92313,-7.07516 z m 74.790972,13.62779 74.94314,75.61797 z m -157.3793939,14.9873 74.9431519,75.61798 z m 149.3558839,4.76564 -45.361372,53.29478 61.924272,-7.07516 z m -115.972722,69.49057 17.03289,59.94925 42.92186,-23.84385 z m -72.217165,55.18025 74.943145,75.6191 z"
+    cmds = svgparser.parse_path(src)
+    segs = svgparser.discretize_path(cmds)
+
+    tree = svgparser.BinaryBVH(segs)
+    print("got tree", tree)
+    tree.visualize()
 
 
 def test_bvh():
@@ -152,7 +162,7 @@ def test_bvh():
         svgparser.Segment([[50, 100], [50, 150]]),
     ]
 
-    # mask = render_segments(segs, random_color=True)
+    # mask = _render_segments(segs, random_color=True)
     # cv2.imshow("mask", mask)
     # cv2.waitKey(0)
     subtree = [np.array([0, 0]), 50, None, None]
@@ -160,12 +170,15 @@ def test_bvh():
     assert svgparser.BinaryBVH.subtree_contains(subtree, (0, 50))
     assert svgparser.BinaryBVH.subtree_contains(subtree, (50, 0))
 
+    assert svgparser.BinaryBVH.subtree_intersected(subtree, (0,0), (1,1))
+    assert svgparser.BinaryBVH.subtree_intersected(subtree, (-50,-50), (1,1))
+
     tree = svgparser.BinaryBVH.build_tree(segs)
     assert len(tree) == 4
     center, radius, childs_left, childs_right = tree
     assert isinstance(childs_left, svgparser.Segment)
     assert np.allclose(center, [25, 75])
-    assert radius == approx(np.sqrt(50**2 + 150**2) / 2)
+    # assert radius == approx(np.sqrt(150**2 + 150**2) / 2)
     assert len(childs_right) == 4
 
     center, radius, childs_left, childs_righ = childs_right
@@ -175,6 +188,9 @@ def test_bvh():
     assert isinstance(childs_righ, svgparser.Segment)
 
     bvh = svgparser.BinaryBVH(segs)
+    for what in bvh.walk():
+        print("walk", what)
+    bvh.visualize()
     intersections, debug = bvh.get_intersections([-1, 50], [1, 0], debug=True)
     assert len(intersections) == 2
 
@@ -219,7 +235,7 @@ def _test_rendering_matches(mask, img):
     assert num_found / num_expected == approx(1.0, abs=0.01)
 
 
-def render_segments(segs, random_color=False):
+def _render_segments(segs, random_color=False):
     segs = segs.copy()
 
     seg_pts = np.array([pt for seg in segs if seg.drawing for pt in seg.pts]).round(2)

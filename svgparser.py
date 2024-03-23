@@ -80,6 +80,22 @@ class Segment:
     def median(self):
         return np.median(self.pts, axis=0)
 
+    def __eq__(self, other):
+        if self.drawing != other.drawing:
+            return False
+
+        if len(self.pts) != len(other.pts):
+            return False
+
+        if np.allclose(self.pts, other.pts):
+            return True
+
+        # backwards, but same points, we only care about appearance
+        if np.allclose(self.pts, other.pts[::-1]):
+            return True
+
+        return False
+
 
 def _render_segments(segs, ax=None, color=None):
     for seg in segs:
@@ -465,10 +481,12 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
             if pts:
                 segments.append(Segment(pts))
         elif cmd.cmd in ["z", "Z"]:
+            new_seg = Segment([cursor.copy(), start_subpath.copy()])
+
             # for single straight lines, Z should not add a duplicate
             segs_visib = [seg for seg in segments if seg.drawing]
-            if len(segs_visib) > 1:
-                segments.append(Segment([cursor.copy(), start_subpath.copy()]))
+            if segs_visib[-1] != new_seg:
+                segments.append(new_seg)
             cursor = start_subpath.copy()
         elif cmd.cmd in ["c", "C"]:
             assert (

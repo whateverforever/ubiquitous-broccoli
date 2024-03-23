@@ -147,6 +147,17 @@ def test_path_geom_simple():
         seg.pts, [[-72.217165, 55.18025], [74.943145 - 72.217165, 75.6191 + 55.18025]]
     )
 
+    #########
+
+    src = (
+        "m 74.790972,13.62779 74.94314,75.61797 z"
+        " m -157.3793939,14.9873 74.9431519,75.61798 z"
+    )
+    cmds = svgparser.parse_path(src)
+    segs = svgparser.discretize_path(cmds)
+    segs_visib = [seg for seg in segs if seg.drawing]
+    assert len(segs_visib) == 2
+
 
 def test_path_hatch():
     return

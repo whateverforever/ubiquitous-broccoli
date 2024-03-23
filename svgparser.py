@@ -81,7 +81,7 @@ class Segment:
         return np.median(self.pts, axis=0)
 
 
-def _render_segments(segs, random_color=False):
+def _render_segments(segs, ax=None, color=None):
     for seg in segs:
         if not seg.drawing:
             continue
@@ -91,7 +91,15 @@ def _render_segments(segs, random_color=False):
         for startp, endp in zip(seg.pts[:-1], seg.pts[1:]):
             xs.extend([startp[0], endp[0]])
             ys.extend([startp[1], endp[1]])
-        plt.plot(xs, ys)
+
+        xs = np.array(xs)
+        ys = np.array(ys)
+
+        xs += np.random.normal(scale=2, size=len(xs))
+        ys += np.random.normal(scale=2, size=len(ys))
+
+        what = ax if ax is not None else plt
+        what.plot(xs, ys, color=color, alpha=0.5)
 
 
 class BinaryBVH:
@@ -99,21 +107,24 @@ class BinaryBVH:
         self._segments = segments
         self._tree = self.build_tree2(self._segments)
 
-    def visualize(self):
+    def visualize(self, ax=None, color=None, only_leaves=False):
         root = self._tree[0]
         radius = int(root.radius)
         img = np.zeros((2 * radius, 2 * radius))
 
+        ax = ax if ax is not None else plt.gca()
+
         for node, *_ in self.walk2():
             if isinstance(node, Segment):
-                _render_segments([node], random_color=True)
+                _render_segments([node], color=color)
                 continue
 
-            plt.gca().add_patch(patches.Circle(node.center, node.radius, fill=False))
+            if only_leaves:
+                continue
 
-        plt.gca().invert_yaxis()
-        plt.gca().axis("equal")
-        plt.show()
+            ax.add_patch(
+                patches.Circle(node.center, node.radius, fill=False, color=color)
+            )
 
     def get_intersections(self, ray_start, ray_dir, ax=None):
         ray_start = np.array(ray_start, dtype=float)
@@ -124,17 +135,21 @@ class BinaryBVH:
             root = self._tree[0]
             ray_end = ray_start + ray_dir * 2 * root.radius
             ax.plot(ray_start, ray_end, color="red")
+            # self.visualize(ax=ax, color=(0.5, 0.5, 0.5))
 
         out = []
         for node, dl, dr in self.walk2():
             if isinstance(node, Segment):
                 out.append(node.median())
+
+                if ax is not None:
+                    _render_segments([node], ax=ax)
                 continue
 
             if ax is not None:
                 ax.set_title(f"{node.center} {node.radius}")
                 ax.add_patch(patches.Circle(node.center, node.radius, fill=False))
-                ax.axis("equal")
+                # ax.axis("equal")
                 plt.pause(1)
 
             left = self._tree[node.left]
@@ -161,6 +176,7 @@ class BinaryBVH:
     def walk2(self):
         nodes = deque([self._tree[0]])
         visited = []
+        visited_segments = 0
         while nodes:
             n = nodes.popleft()
 
@@ -180,6 +196,7 @@ class BinaryBVH:
             yield n, _discardl, _discardr
 
             if isinstance(n, Segment):
+                visited_segments += 1
                 # we can't walk past leaf
                 continue
 
@@ -192,7 +209,12 @@ class BinaryBVH:
                 visited.append(n.right)
                 nodes.append(self._tree[n.right])
 
-        print("visited", visited, "efficiency:", 1 - len(visited) / len(self._tree))
+        print(
+            f"nodes_visited={len(visited)}/{len(self._tree)} nodes_efficiency: {(1 - len(visited) / len(self._tree))*100:.0f}%"
+        )
+        print(
+            f"segments_visited={visited_segments}/{len(self._segments)} segments_efficiency: {(1 - visited_segments / len(self._segments))*100:.0f}%"
+        )
 
     @staticmethod
     def subtree_contains(center, radius, location):

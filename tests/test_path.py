@@ -133,6 +133,14 @@ def test_path_geometry(subject):
 
     _test_rendering_matches(mask, img)
 
+def test_path_geom_simple():
+    src = " m -72.217165,55.18025 74.943145,75.6191 z"
+    cmds = svgparser.parse_path(src)
+    segs = svgparser.discretize_path(cmds)
+
+    segs_visib = [seg for seg in segs if seg.drawing]
+    assert len(segs_visib) == 1
+
 
 def test_path_hatch():
     src = "M 178.91787,36.739211 359.58365,217.405 178.91787,398.07078 -1.7479181,217.405 Z"

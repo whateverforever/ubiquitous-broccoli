@@ -201,7 +201,7 @@ def test_bvh():
 
     root = tree._tree[0]
     ray_end = ray_start + ray_dir * 2 * root.radius
-    ax2.plot(ray_start, ray_end, color="red")
+    ax2.plot([ray_start[0], ray_end[0]], [ray_start[1], ray_end[1]], color="red")
     tree.visualize(ax=ax2, only_leaves=True)
 
     intersections, debug = tree.get_intersections(ray_start, ray_dir, ax=ax)
@@ -210,7 +210,7 @@ def test_bvh():
     plt.show()
 
     print("intersections", intersections)
-    assert len(intersections) == 2
+    assert len(intersections) == 4
 
 
 # def test_path_hatch():

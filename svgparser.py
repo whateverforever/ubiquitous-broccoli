@@ -150,7 +150,7 @@ class BinaryBVH:
         if ax is not None:
             root = self._tree[0]
             ray_end = ray_start + ray_dir * 2 * root.radius
-            ax.plot(ray_start, ray_end, color="red")
+            ax.plot([ray_start[0], ray_end[0]], [ray_start[1], ray_end[1]], color="red")
             self.visualize(ax=ax, color=(0.8, 0.8, 0.8))
 
         out = []

@@ -3,6 +3,7 @@ import os.path as osp
 
 import numpy as np
 import cv2
+import matplotlib.pyplot as plt
 
 import svgparser
 
@@ -152,7 +153,22 @@ def test_bvh2():
 
     tree = svgparser.BinaryBVH(segs)
     print("got tree", tree)
+
+
+    ray_start = [-25, 320]
+    ray_dir = [1,-0.5]
+
+    fig, ax = plt.subplots()
+    ax.invert_yaxis()
+    ax.axis("equal")
+    intersections, debug = tree.get_intersections(ray_start, ray_dir, ax=ax)
+    plt.show()
+
+    plt.figure()
+    plt.scatter(intersections[:, 0], intersections[:, 1])
     tree.visualize()
+    print("intersections", intersections)
+    assert len(intersections) == 8
 
 
 def test_bvh():

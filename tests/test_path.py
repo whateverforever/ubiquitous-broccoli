@@ -6,6 +6,7 @@ import cv2
 import matplotlib.pyplot as plt
 
 import svgparser
+from svgparser import PathCommand, BinaryBVH, PolyLine
 
 import pytest
 from pytest import approx
@@ -74,10 +75,10 @@ expected = {
 def test_parsing():
     src = "m -118.56674,427.38115 0.49637,-4.27875 3.32793,0.38608 q 7.53875,0.87455 9.37849,-0.15099 1.91552,-1.08556 2.38826,-5.16056"
     expected = [
-        svgparser.PathCommand(
+        PathCommand(
             "m", [(-118.56674, 427.38115), (0.49637, -4.27875), (3.32793, 0.38608)]
         ),
-        svgparser.PathCommand(
+        PathCommand(
             "q",
             [
                 (7.53875, 0.87455),
@@ -92,8 +93,8 @@ def test_parsing():
 
     src = "M 63.960938 60.984375 C 63.974368 61.367094 64.441385 61.392249 64.711114 61.515528"
     expected = [
-        svgparser.PathCommand("M", [(63.960938, 60.984375)]),
-        svgparser.PathCommand(
+        PathCommand("M", [(63.960938, 60.984375)]),
+        PathCommand(
             "C",
             [(63.974368, 61.367094), (64.441385, 61.392249), (64.711114, 61.515528)],
         ),
@@ -103,12 +104,12 @@ def test_parsing():
 
     src = "M135.579,249.92L137.665,249.592C137.782,250.428 138.109,251.069 138.644,251.514"
     expected = [
-        svgparser.PathCommand("M", [(135.579, 249.92)]),
-        svgparser.PathCommand(
+        PathCommand("M", [(135.579, 249.92)]),
+        PathCommand(
             "L",
             [(137.665, 249.592)],
         ),
-        svgparser.PathCommand(
+        PathCommand(
             "C", [(137.782, 250.428), (138.109, 251.069), (138.644, 251.514)]
         ),
     ]
@@ -158,12 +159,14 @@ def test_path_geom_simple():
     polys_visib = [poly for poly in polys if poly.drawing]
     assert len(polys_visib) == 2
 
+def test_polyline_intersections():
+    pass
 
 def test_bvh_intersections():
     ray_start = [0, 0]
     ray_dir = [1, 0]
 
-    intersected = lambda center, radius: svgparser.BinaryBVH.subtree_intersected(
+    intersected = lambda center, radius: BinaryBVH.subtree_intersected(
         center, radius, ray_start, ray_dir
     )
 
@@ -186,7 +189,7 @@ def test_bvh():
     )
     cmds = svgparser.parse_path(src)
     polys = svgparser.discretize_path(cmds)
-    tree = svgparser.BinaryBVH(polys)
+    tree = BinaryBVH(polys)
 
     ray_start = np.array([-25, 300])
     ray_dir = np.array([1, -0.5])

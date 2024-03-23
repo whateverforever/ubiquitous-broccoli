@@ -123,12 +123,12 @@ def test_path_geometry(subject):
     cmds = svgparser.parse_path(path)
     assert len(cmds) == n_cmds
 
-    segs = svgparser.discretize_path(cmds, 0.1)
-    seg_pts = np.array([pt for seg in segs for pt in seg.pts]).round(2)
+    polys = svgparser.discretize_path(cmds, 0.1)
+    seg_pts = np.array([pt for poly in polys for pt in poly.pts]).round(2)
     assert all(kpt in seg_pts for kpt in keypts)
 
     ## Now test overall appearance
-    mask = _render_segments(segs)
+    mask = _render_polylines(polys)
     img = cv2.imread(getfile(filename), cv2.IMREAD_GRAYSCALE)
 
     _test_rendering_matches(mask, img)
@@ -137,14 +137,14 @@ def test_path_geometry(subject):
 def test_path_geom_simple():
     src = " m -72.217165,55.18025 74.943145,75.6191 z"
     cmds = svgparser.parse_path(src)
-    segs = svgparser.discretize_path(cmds)
+    polys = svgparser.discretize_path(cmds)
 
-    segs_visib = [seg for seg in segs if seg.drawing]
-    assert len(segs_visib) == 1
+    polys_visib = [poly for poly in polys if poly.drawing]
+    assert len(polys_visib) == 1
 
-    seg = segs_visib[0]
+    poly = polys_visib[0]
     assert np.allclose(
-        seg.pts, [[-72.217165, 55.18025], [74.943145 - 72.217165, 75.6191 + 55.18025]]
+        poly.pts, [[-72.217165, 55.18025], [74.943145 - 72.217165, 75.6191 + 55.18025]]
     )
 
     #########
@@ -154,9 +154,9 @@ def test_path_geom_simple():
         " m -157.3793939,14.9873 74.9431519,75.61798 z"
     )
     cmds = svgparser.parse_path(src)
-    segs = svgparser.discretize_path(cmds)
-    segs_visib = [seg for seg in segs if seg.drawing]
-    assert len(segs_visib) == 2
+    polys = svgparser.discretize_path(cmds)
+    polys_visib = [poly for poly in polys if poly.drawing]
+    assert len(polys_visib) == 2
 
 
 def test_bvh_intersections():
@@ -185,8 +185,8 @@ def test_bvh():
         " m -72.217165,55.18025 74.943145,75.6191 z"
     )
     cmds = svgparser.parse_path(src)
-    segs = svgparser.discretize_path(cmds)
-    tree = svgparser.BinaryBVH(segs)
+    polys = svgparser.discretize_path(cmds)
+    tree = svgparser.BinaryBVH(polys)
 
     ray_start = np.array([-25, 300])
     ray_dir = np.array([1, -0.5])
@@ -217,10 +217,10 @@ def test_bvh():
 #     return
 #     src = "M 178.91787,36.739211 359.58365,217.405 178.91787,398.07078 -1.7479181,217.405 Z"
 #     cmds = svgparser.parse_path(src)
-#     segs = svgparser.discretize_path(cmds)
-#     segs = svgparser.hatch_path(segs, [0, 0], [1, 0], 50)
+#     polys = svgparser.discretize_path(cmds)
+#     polys = svgparser.hatch_path(polys, [0, 0], [1, 0], 50)
 #
-#     mask = _render_segments(segs)
+#     mask = _render_polylines(polys)
 #     img = cv2.imread(getfile("hatch.png"), cv2.IMREAD_GRAYSCALE)
 #
 #     _test_rendering_matches(mask, img)
@@ -268,19 +268,19 @@ def _test_rendering_matches(mask, img):
     assert num_found / num_expected == approx(1.0, abs=0.01)
 
 
-def _render_segments(segs, random_color=False):
-    segs = segs.copy()
+def _render_polylines(polys, random_color=False):
+    polys = polys.copy()
 
-    seg_pts = np.array([pt for seg in segs if seg.drawing for pt in seg.pts]).round(2)
+    seg_pts = np.array([pt for poly in polys if poly.drawing for pt in poly.pts]).round(2)
     dims = (np.max(seg_pts, axis=0) - np.min(seg_pts, axis=0)).round().astype(int)
     mask = np.zeros([*dims[::-1], 3], dtype=np.uint8)
 
     origin = np.min(seg_pts, axis=0)
-    for seg in segs:
-        if not seg.drawing:
+    for poly in polys:
+        if not poly.drawing:
             continue
 
-        for startp, endp in zip(seg.pts[:-1], seg.pts[1:]):
+        for startp, endp in zip(poly.pts[:-1], poly.pts[1:]):
             startp = np.array(startp) - origin
             endp = np.array(endp) - origin
 

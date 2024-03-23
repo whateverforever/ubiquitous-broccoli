@@ -35,12 +35,12 @@ Point2 = Union[np.ndarray, Sequence[float]]
 
 def main():
     cmds = parse_path(source)
-    segments = discretize_path(cmds)
+    polylines = discretize_path(cmds)
 
     csv = []
-    for seg in segments:
-        pts = np.array(seg.pts)
-        if not seg.drawing:
+    for poly in polylines:
+        pts = np.array(poly.pts)
+        if not poly.drawing:
             csv.append(f"{','.join(str(w) for w in pts[-1].round(2))},false\n")
             continue
 
@@ -68,7 +68,7 @@ class PathCommand:
 
 
 @dataclass
-class Segment:
+class PolyLine:
     pts: Sequence[Point2]
     drawing: bool = True
 
@@ -97,14 +97,14 @@ class Segment:
         return False
 
 
-def _render_segments(segs, ax=None, color=None, jitter=False):
-    for seg in segs:
-        if not seg.drawing:
+def _render_polylines(polys, ax=None, color=None, jitter=False):
+    for poly in polys:
+        if not poly.drawing:
             continue
 
         xs = []
         ys = []
-        for startp, endp in zip(seg.pts[:-1], seg.pts[1:]):
+        for startp, endp in zip(poly.pts[:-1], poly.pts[1:]):
             xs.extend([startp[0], endp[0]])
             ys.extend([startp[1], endp[1]])
 
@@ -119,9 +119,9 @@ def _render_segments(segs, ax=None, color=None, jitter=False):
 
 
 class BinaryBVH:
-    def __init__(self, segments: Collection[Segment]):
-        self._segments = segments
-        self._tree = self.build_tree(self._segments)
+    def __init__(self, polylines: Collection[PolyLine]):
+        self._polylines = polylines
+        self._tree = self.build_tree(self._polylines)
 
     def visualize(self, ax=None, color=None, only_leaves=False):
         root = self._tree[0]
@@ -131,8 +131,8 @@ class BinaryBVH:
         ax = ax if ax is not None else plt.gca()
 
         for node, *_ in self.walk():
-            if isinstance(node, Segment):
-                _render_segments([node], color=color)
+            if isinstance(node, PolyLine):
+                _render_polylines([node], color=color)
                 continue
 
             if only_leaves:
@@ -155,12 +155,12 @@ class BinaryBVH:
 
         out = []
         for node, dl, dr in self.walk():
-            if isinstance(node, Segment):
+            if isinstance(node, PolyLine):
                 # XXX actual intersection
                 out.append(node.median())
 
                 if ax is not None:
-                    _render_segments([node], ax=ax)
+                    _render_polylines([node], ax=ax)
                 continue
 
             if ax is not None:
@@ -171,12 +171,12 @@ class BinaryBVH:
             left = self._tree[node.left]
             righ = self._tree[node.right]
 
-            if not isinstance(left, Segment) and not BinaryBVH.subtree_intersected(
+            if not isinstance(left, PolyLine) and not BinaryBVH.subtree_intersected(
                 left.center, left.radius, ray_start, ray_dir
             ):
                 dl()
 
-            if not isinstance(righ, Segment) and not BinaryBVH.subtree_intersected(
+            if not isinstance(righ, PolyLine) and not BinaryBVH.subtree_intersected(
                 righ.center, righ.radius, ray_start, ray_dir
             ):
                 dr()
@@ -200,7 +200,7 @@ class BinaryBVH:
 
             yield n, _discardl, _discardr
 
-            if isinstance(n, Segment):
+            if isinstance(n, PolyLine):
                 # we can't walk past leaf
                 continue
 
@@ -215,9 +215,7 @@ class BinaryBVH:
 
     @staticmethod
     def subtree_intersected(center, radius, ray_start, ray_dir):
-        print("ray start contained?")
         if BinaryBVH.subtree_contains(center, radius, ray_start):
-            print("start contained")
             return True
 
         ray_start = np.array(ray_start)
@@ -226,8 +224,6 @@ class BinaryBVH:
 
         dist = np.abs(np.dot(center - ray_start, ray_dir))
         spot = ray_start + ray_dir * dist
-        print("dist", dist, "spot", spot)
-        print("does", center, radius, "contain", spot)
         return BinaryBVH.subtree_contains(center, radius, spot)
 
     @dataclass
@@ -238,20 +234,20 @@ class BinaryBVH:
         right: int
 
     @staticmethod
-    def build_tree(segments: Sequence[Segment]):
-        for seg in segments:
-            assert isinstance(seg, Segment)
+    def build_tree(polylines: Sequence[PolyLine]):
+        for poly in polylines:
+            assert isinstance(poly, PolyLine)
 
-        tree = [None] * int(2 * len(segments) - 1)
-        segments = [seg for seg in segments if seg.drawing]
+        tree = [None] * int(2 * len(polylines) - 1)
+        polylines = [poly for poly in polylines if poly.drawing]
 
         node_idx = 0
-        to_split = deque([(segments, node_idx)])
+        to_split = deque([(polylines, node_idx)])
 
         while to_split:
             seggos, this_idx = to_split.popleft()
-            
-            mini, maxi = get_segments_bb(seggos)
+
+            mini, maxi = get_polylines_bb(seggos)
             dims = maxi - mini
             center = mini + dims / 2
             radius = np.linalg.norm(dims) / 2
@@ -263,7 +259,7 @@ class BinaryBVH:
                 wheres = []
                 diffs = []
                 for split_dim in [0, 1]:
-                    segment_locs = np.array([seg.median()[split_dim] for seg in seggos])
+                    segment_locs = np.array([poly.median()[split_dim] for poly in seggos])
                     where_left = segment_locs < center[split_dim]
                     where_righ = segment_locs >= center[split_dim]
 
@@ -275,39 +271,39 @@ class BinaryBVH:
                 
                 where_left, where_righ = wheres[np.argmin(diffs)]
 
-            segments_left = [seg for i, seg in enumerate(seggos) if where_left[i]]
-            segments_righ = [seg for i, seg in enumerate(seggos) if where_righ[i]]
+            polylines_left = [poly for i, poly in enumerate(seggos) if where_left[i]]
+            polylines_righ = [poly for i, poly in enumerate(seggos) if where_righ[i]]
 
             left_idx = righ_idx = None
-            if segments_left:
+            if polylines_left:
                 node_idx += 1
                 left_idx = node_idx
-            if segments_righ:
+            if polylines_righ:
                 node_idx += 1
                 righ_idx = node_idx
 
-            if segments_left and not segments_righ:
-                assert len(segments_left) == 1
-                tree[this_idx] = segments_left[0]
+            if polylines_left and not polylines_righ:
+                assert len(polylines_left) == 1
+                tree[this_idx] = polylines_left[0]
                 raise RuntimeError("asdf")
-            elif segments_righ and not segments_left:
-                assert len(segments_righ) == 1
-                tree[this_idx] = segments_righ[0]
+            elif polylines_righ and not polylines_left:
+                assert len(polylines_righ) == 1
+                tree[this_idx] = polylines_righ[0]
                 raise RuntimeError("iouoiuoiu")
             else:
                 tree[this_idx] = BinaryBVH.Node(center, radius, left_idx, righ_idx)
 
-            if len(segments_left) > 1:
-                to_split.append((segments_left, left_idx))
-            elif segments_left:
-                tree[left_idx] = segments_left[0]
+            if len(polylines_left) > 1:
+                to_split.append((polylines_left, left_idx))
+            elif polylines_left:
+                tree[left_idx] = polylines_left[0]
             else:
                 print("didnt use left idx", left_idx)
 
-            if len(segments_righ) > 1:
-                to_split.append((segments_righ, righ_idx))
-            elif segments_righ:
-                tree[righ_idx] = segments_righ[0]
+            if len(polylines_righ) > 1:
+                to_split.append((polylines_righ, righ_idx))
+            elif polylines_righ:
+                tree[righ_idx] = polylines_righ[0]
             else:
                 print("didnt use right idx", righ_idx)
 
@@ -404,7 +400,7 @@ def bezier_cubic(start, end, control_pt1, control_pt2, arc_len=True):
 
 def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
     cursor = [0.0, 0.0]
-    segments = []
+    polylines = []
     start_subpath = cursor
 
     for cmd in cmds:
@@ -415,7 +411,7 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
             cursor_old = cursor.copy()
             cursor[0] += cmd.coords[0][0]
             cursor[1] += cmd.coords[0][1]
-            segments.append(Segment([cursor_old, cursor], drawing=False))
+            polylines.append(PolyLine([cursor_old, cursor], drawing=False))
             start_subpath = cursor.copy()
 
             pts = [start_subpath]
@@ -426,13 +422,13 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
 
             # subsequent move commands behave like line commands
             if pts:
-                segments.append(Segment(pts))
+                polylines.append(PolyLine(pts))
         elif cmd.cmd == "M":
             # absolute move
             cursor_old = cursor.copy()
             cursor[0] = cmd.coords[0][0]
             cursor[1] = cmd.coords[0][1]
-            segments.append(Segment([cursor_old, cursor], drawing=False))
+            polylines.append(PolyLine([cursor_old, cursor], drawing=False))
             start_subpath = cursor.copy()
 
             pts = [start_subpath]
@@ -443,14 +439,14 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
 
             # subsequent move commands behave like line commands
             if pts:
-                segments.append(Segment(pts))
+                polylines.append(PolyLine(pts))
         elif cmd.cmd in ["z", "Z"]:
-            new_seg = Segment([cursor.copy(), start_subpath.copy()])
+            new_seg = PolyLine([cursor.copy(), start_subpath.copy()])
 
             # for single straight lines, Z should not add a duplicate
-            segs_visib = [seg for seg in segments if seg.drawing]
-            if segs_visib[-1] != new_seg:
-                segments.append(new_seg)
+            polys_visib = [poly for poly in polylines if poly.drawing]
+            if polys_visib[-1] != new_seg:
+                polylines.append(new_seg)
             cursor = start_subpath.copy()
         elif cmd.cmd in ["c", "C"]:
             assert (
@@ -474,7 +470,7 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
                     # how does this happen?
                     continue
                 pts = np.array([b(s) for s in asses])
-                segments.append(Segment(pts))
+                polylines.append(PolyLine(pts))
                 cursor = nextpt
         elif cmd.cmd in ["q", "Q"]:
             assert (
@@ -497,7 +493,7 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
                     # how does this happen?
                     continue
                 pts = np.array([b(s) for s in asses])
-                segments.append(Segment(pts))
+                polylines.append(PolyLine(pts))
                 cursor = nextpt
         elif cmd.cmd == "l":
             # relative polyline
@@ -509,7 +505,7 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
                 xs.append(cursor[0])
                 ys.append(cursor[1])
             # plt.plot(xs, ys)
-            segments.append(Segment(list(zip(xs, ys))))
+            polylines.append(PolyLine(list(zip(xs, ys))))
         elif cmd.cmd == "L":
             # absolute polyline
             xs = [cursor[0]]
@@ -520,11 +516,11 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
                 xs.append(cursor[0])
                 ys.append(cursor[1])
             # plt.plot(xs, ys)
-            segments.append(Segment(list(zip(xs, ys))))
+            polylines.append(PolyLine(list(zip(xs, ys))))
         else:
             raise NotImplementedError(f"Unknown command {cmd.cmd}")
 
-    return segments
+    return polylines
 
 
 def parse_path(source):
@@ -543,20 +539,20 @@ def parse_path(source):
     return cmds
 
 
-def get_segments_bb(segments: Collection[Segment]):
-    mins, maxs = zip(*[seg.bb() for seg in segments if seg.drawing])
+def get_polylines_bb(polylines: Collection[PolyLine]):
+    mins, maxs = zip(*[poly.bb() for poly in polylines if poly.drawing])
     mini = np.min(mins, axis=0)
     maxi = np.max(maxs, axis=0)
     return mini, maxi
 
 
 def hatch_path(
-    segments: Collection[Segment],
+    polylines: Collection[PolyLine],
     hatch_start_xy=None,
     hatch_dir=None,
     hatch_dist=None,
 ):
-    mini, maxi = get_segments_bb(segments)
+    mini, maxi = get_polylines_bb(polylines)
     dims = maxi - mini
 
     hatch_dir = np.array(hatch_dir, dtype=float)
@@ -575,9 +571,9 @@ def hatch_path(
     for k in range(nsteps):
         anchor = mini + k * hatch_dist * hatch_normal
         other = anchor + np.dot(dims, hatch_dir) * hatch_dir
-        segments.append(Segment([anchor, other]))
+        polylines.append(PolyLine([anchor, other]))
 
-    return segments
+    return polylines
 
 
 if __name__ == "__main__":

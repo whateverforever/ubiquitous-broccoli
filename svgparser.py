@@ -121,7 +121,7 @@ def _render_segments(segs, ax=None, color=None, jitter=False):
 class BinaryBVH:
     def __init__(self, segments: Collection[Segment]):
         self._segments = segments
-        self._tree = self.build_tree2(self._segments)
+        self._tree = self.build_tree(self._segments)
 
     def visualize(self, ax=None, color=None, only_leaves=False):
         root = self._tree[0]
@@ -130,7 +130,7 @@ class BinaryBVH:
 
         ax = ax if ax is not None else plt.gca()
 
-        for node, *_ in self.walk2():
+        for node, *_ in self.walk():
             if isinstance(node, Segment):
                 _render_segments([node], color=color)
                 continue
@@ -151,10 +151,10 @@ class BinaryBVH:
             root = self._tree[0]
             ray_end = ray_start + ray_dir * 2 * root.radius
             ax.plot([ray_start[0], ray_end[0]], [ray_start[1], ray_end[1]], color="red")
-            self.visualize(ax=ax, color=(0.8, 0.8, 0.8))
+            self.visualize(ax=ax, color=(0.9, 0.9, 0.9))
 
         out = []
-        for node, dl, dr in self.walk2():
+        for node, dl, dr in self.walk():
             if isinstance(node, Segment):
                 # XXX actual intersection
                 out.append(node.median())
@@ -166,72 +166,48 @@ class BinaryBVH:
             if ax is not None:
                 ax.set_title(f"{node.center} {node.radius}")
                 ax.add_patch(patches.Circle(node.center, node.radius, fill=False))
-                # ax.axis("equal")
                 plt.pause(1)
 
             left = self._tree[node.left]
             righ = self._tree[node.right]
 
-            if isinstance(left, Segment):
-                pass
-            elif not BinaryBVH.subtree_intersected(
+            if not isinstance(left, Segment) and not BinaryBVH.subtree_intersected(
                 left.center, left.radius, ray_start, ray_dir
             ):
-                print("calling discardlllll")
                 dl()
 
-            if isinstance(righ, Segment):
-                pass
-            elif not BinaryBVH.subtree_intersected(
+            if not isinstance(righ, Segment) and not BinaryBVH.subtree_intersected(
                 righ.center, righ.radius, ray_start, ray_dir
             ):
-                print("calling discardoooo")
                 dr()
 
         return np.array(out), None
 
-    def walk2(self):
+    def walk(self):
         nodes = deque([self._tree[0]])
-        visited = []
-        visited_segments = 0
         while nodes:
             n = nodes.popleft()
 
             dl = dr = False
 
             def _discardl():
-                print("discarding l", n.left)
                 nonlocal dl
                 dl = True
 
             def _discardr():
-                print("discarding r", n.right)
                 nonlocal dr
                 dr = True
 
-            print("walking yields", n)
             yield n, _discardl, _discardr
 
             if isinstance(n, Segment):
-                visited_segments += 1
                 # we can't walk past leaf
                 continue
 
-            print("after yield, dl dr", dl, dr)
-
             if not dl and n.left is not None:
-                visited.append(n.left)
                 nodes.append(self._tree[n.left])
             if not dr and n.right is not None:
-                visited.append(n.right)
                 nodes.append(self._tree[n.right])
-
-        print(
-            f"nodes_visited={len(visited)}/{len(self._tree)} nodes_efficiency: {(1 - len(visited) / len(self._tree))*100:.0f}%"
-        )
-        print(
-            f"segments_visited={visited_segments}/{len(self._segments)} segments_efficiency: {(1 - visited_segments / len(self._segments))*100:.0f}%"
-        )
 
     @staticmethod
     def subtree_contains(center, radius, location):
@@ -262,58 +238,45 @@ class BinaryBVH:
         right: int
 
     @staticmethod
-    def build_tree2(segments: Sequence[Segment]):
+    def build_tree(segments: Sequence[Segment]):
         for seg in segments:
             assert isinstance(seg, Segment)
 
+        tree = [None] * int(2 * len(segments) - 1)
         segments = [seg for seg in segments if seg.drawing]
 
-        to_split = deque([])
-        tree = [None] * int(2 * len(segments) - 1)  # node, childl, chidr, ...
-
         node_idx = 0
-        to_split.append((segments, 0, node_idx))
+        to_split = deque([(segments, node_idx)])
 
         while to_split:
-            seggos, split_dim, this_idx = to_split.popleft()
-
-            print("splitting", seggos)
+            seggos, this_idx = to_split.popleft()
+            
             mini, maxi = get_segments_bb(seggos)
             dims = maxi - mini
             center = mini + dims / 2
             radius = np.linalg.norm(dims) / 2
 
-            retried = False
-            # XXX instead we could always split in the axis which yields the most
-            # similary sized left and right
-            while True:
-                segment_locs = np.array([seg.median()[split_dim] for seg in seggos])
-                where_left = segment_locs < center[split_dim]
-                where_righ = segment_locs >= center[split_dim]
-                print("left size", np.count_nonzero(where_left), where_left)
-                print("right size", np.count_nonzero(where_righ), where_righ)
-
-                nleft = np.count_nonzero(where_left)
-                nrigh = np.count_nonzero(where_righ)
-                if nleft > 0 and nrigh > 0:
-                    break
-
-                if retried:
-                    break
-
-                # in this case, splitting in our chosen direction didn't yield a split
-                split_dim = 1 if split_dim == 0 else 0
-                retried = True
-                print("retrying")
-
             if len(seggos) == 2:
                 where_left = [True, False]
                 where_righ = [False, True]
+            else:
+                wheres = []
+                diffs = []
+                for split_dim in [0, 1]:
+                    segment_locs = np.array([seg.median()[split_dim] for seg in seggos])
+                    where_left = segment_locs < center[split_dim]
+                    where_righ = segment_locs >= center[split_dim]
+
+                    nleft = np.count_nonzero(where_left)
+                    nrigh = np.count_nonzero(where_righ)
+
+                    wheres.append((where_left, where_righ))
+                    diffs.append(abs(nleft - nrigh))
+                
+                where_left, where_righ = wheres[np.argmin(diffs)]
 
             segments_left = [seg for i, seg in enumerate(seggos) if where_left[i]]
             segments_righ = [seg for i, seg in enumerate(seggos) if where_righ[i]]
-
-            next_dim = 1 if split_dim == 0 else 0
 
             left_idx = righ_idx = None
             if segments_left:
@@ -335,18 +298,15 @@ class BinaryBVH:
                 tree[this_idx] = BinaryBVH.Node(center, radius, left_idx, righ_idx)
 
             if len(segments_left) > 1:
-                to_split.append((segments_left, next_dim, left_idx))
+                to_split.append((segments_left, left_idx))
             elif segments_left:
-                print("got leaf", segments_left[0])
-                print("left idx", left_idx, "of", len(tree))
                 tree[left_idx] = segments_left[0]
             else:
                 print("didnt use left idx", left_idx)
 
             if len(segments_righ) > 1:
-                to_split.append((segments_righ, next_dim, righ_idx))
+                to_split.append((segments_righ, righ_idx))
             elif segments_righ:
-                print("got leaf", segments_righ[0])
                 tree[righ_idx] = segments_righ[0]
             else:
                 print("didnt use right idx", righ_idx)

@@ -443,7 +443,10 @@ def discretize_path(cmds: Sequence[PathCommand], spline_step=None):
             if pts:
                 segments.append(Segment(pts))
         elif cmd.cmd in ["z", "Z"]:
-            segments.append(Segment([cursor.copy(), start_subpath.copy()]))
+            # for single straight lines, Z should not add a duplicate
+            segs_visib = [seg for seg in segments if seg.drawing]
+            if len(segs_visib) > 1:
+                segments.append(Segment([cursor.copy(), start_subpath.copy()]))
             cursor = start_subpath.copy()
         elif cmd.cmd in ["c", "C"]:
             assert (

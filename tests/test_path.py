@@ -11,7 +11,7 @@ from svgparser import PathCommand, BinaryBVH, PolyLine
 import pytest
 from pytest import approx
 
-DEBUG = False
+DEBUG = True
 TDIR = osp.dirname(__file__)
 getfile = lambda *x: osp.join(TDIR, *x)
 
@@ -164,6 +164,10 @@ def test_polyline_intersections():
     assert len(inter) == 1
     assert np.allclose(inter[0], [0, 0.5])
 
+    polyb = PolyLine([[-1.7479181, 217.405], [178.91787, 36.739211]])
+    inter = list(polyb.get_intersections(([-1.7479181, 336.739211]), [1, 0]))
+    assert len(inter) == 0
+
 
 def test_bvh_intersections():
     ray_start = [0, 0]
@@ -198,38 +202,45 @@ def test_bvh():
     ray_dir = np.array([1, -0.5])
     ray_dir /= np.linalg.norm(ray_dir)
 
-    fig, axs = plt.subplots(ncols=2, sharex=True, sharey=True)
-    for ax in axs:
-        ax.invert_yaxis()
-        # ax.axis("equal")
-
-    ax, ax2 = axs
-
     root = tree._tree[0]
     ray_end = ray_start + ray_dir * 2 * root.radius
-    ax2.plot([ray_start[0], ray_end[0]], [ray_start[1], ray_end[1]], color="red")
-    tree.visualize(ax=ax2, only_leaves=True)
+
+    ax = ax2 = None
+    if DEBUG:
+        _, (ax, ax2) = plt.subplots(ncols=2, sharex=True, sharey=True)
+        ax2.plot([ray_start[0], ray_end[0]], [ray_start[1], ray_end[1]], color="red")
+        tree.visualize(ax=ax2, only_leaves=True)
 
     intersections, debug = tree.get_intersections(ray_start, ray_dir, ax=ax)
-    plt.scatter(intersections[:, 0], intersections[:, 1])
-    plt.pause(1)
-    plt.show()
 
-    print("intersections", intersections)
+    if DEBUG:
+        plt.scatter(intersections[:, 0], intersections[:, 1])
+        plt.pause(1)
+        plt.show()
+
     assert len(intersections) == 4
+    assert debug["n_visited_polys"] == 5
+    assert np.allclose(
+        intersections,
+        [
+            [-19.26117068, 297.13058534],
+            [40.05842557, 267.47078722],
+            [80.68434387, 247.15782806],
+            [207.64629228, 183.67685386],
+        ],
+    )
 
 
-# def test_path_hatch():
-#     return
-#     src = "M 178.91787,36.739211 359.58365,217.405 178.91787,398.07078 -1.7479181,217.405 Z"
-#     cmds = svgparser.parse_path(src)
-#     polys = svgparser.discretize_path(cmds)
-#     polys = svgparser.hatch_path(polys, [0, 0], [1, 0], 50)
-#
-#     mask = _render_polylines(polys)
-#     img = cv2.imread(getfile("hatch.png"), cv2.IMREAD_GRAYSCALE)
-#
-#     _test_rendering_matches(mask, img)
+def test_path_hatch():
+    src = "M 178.91787,36.739211 359.58365,217.405 178.91787,398.07078 -1.7479181,217.405 Z"
+    cmds = svgparser.parse_path(src)
+    polys = svgparser.discretize_path(cmds)
+    polys = svgparser.hatch_path(polys, [0, 0], [1, 0], 50)
+
+    mask = _render_polylines(polys)
+    img = cv2.imread(getfile("hatch.png"), cv2.IMREAD_GRAYSCALE)
+
+    _test_rendering_matches(mask, img)
 
 
 ################################################################################

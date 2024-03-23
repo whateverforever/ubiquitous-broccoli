@@ -91,15 +91,19 @@ class PolyLine:
         x2, y2 = ray_start + ray_dir
 
         for seg in self.segments():
+            seg = np.array(seg)
+
             x3, y3 = seg[0]
             x4, y4 = seg[1]
 
-            u = ((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / (
+            u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / (
                 (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
             )
+            print("uuuuuuuuu before", u)
 
-            if 0 <= abs(u) <= 1:
-                intersect_pt = seg[0] + abs(u) * np.subtract(seg[1], seg[0])
+            if 0 <= u <= 1:
+                print("uuuuuuuuuuu", u)
+                intersect_pt = seg[0] + u * (seg[1] - seg[0])
                 yield intersect_pt
 
     def __eq__(self, other):
@@ -142,7 +146,7 @@ def _render_polylines(polys, ax=None, color=None, jitter=False):
 
 class BinaryBVH:
     def __init__(self, polylines: Collection[PolyLine]):
-        self._polylines = polylines
+        self._polylines = [p for p in polylines if p.drawing]
         self._tree = self.build_tree(self._polylines)
 
     def visualize(self, ax=None, color=None, only_leaves=False):
@@ -175,19 +179,27 @@ class BinaryBVH:
             ax.plot([ray_start[0], ray_end[0]], [ray_start[1], ray_end[1]], color="red")
             self.visualize(ax=ax, color=(0.9, 0.9, 0.9))
 
+        n_visited_nodes = 0
+        n_visited_polys = 0
         out = []
+
         for node, dl, dr in self.walk():
             if isinstance(node, PolyLine):
+                n_visited_polys += 1
+
                 inters = list(node.get_intersections(ray_start, ray_dir))
-                print("got intersections", inters)
                 out.extend(inters)
 
                 if ax is not None:
                     _render_polylines([node], ax=ax)
                 continue
+            else:
+                n_visited_nodes += 1
 
             if ax is not None:
-                ax.set_title(f"{node.center} {node.radius}")
+                ax.set_title(
+                    f"visited {n_visited_nodes}/{len(self._tree)} nodes, evaluated {n_visited_polys}/{len(self._polylines)} polylines"
+                )
                 ax.add_patch(patches.Circle(node.center, node.radius, fill=False))
                 plt.pause(1)
 
@@ -204,7 +216,15 @@ class BinaryBVH:
             ):
                 dr()
 
-        return np.array(out), None
+        if ax is not None:
+            ax.set_title(
+                f"visited {n_visited_nodes}/{len(self._tree)} nodes, evaluated {n_visited_polys}/{len(self._polylines)} polylines"
+            )
+            plt.pause(1)
+
+        return np.array(out), dict(
+            n_visited_polys=n_visited_polys, n_visited_nodes=n_visited_nodes
+        )
 
     def walk(self):
         nodes = deque([self._tree[0]])
@@ -591,12 +611,19 @@ def hatch_path(
         hatch_normal *= -1
 
     diag = np.dot(dims, hatch_normal)
-    nsteps = round(diag / hatch_dist)
+    nsteps = round(diag / hatch_dist) + 1 # edgar der unsaubere zauberer
 
+    tree = BinaryBVH(polylines)
+
+    _, ax = plt.subplots()
     for k in range(nsteps):
         anchor = mini + k * hatch_dist * hatch_normal
         other = anchor + np.dot(dims, hatch_dir) * hatch_dir
-        polylines.append(PolyLine([anchor, other]))
+
+        print("anchor", anchor, other - anchor)
+        inters, _ = tree.get_intersections(anchor, other - anchor, ax=ax)
+        print("inters", inters)
+        polylines.append(PolyLine(inters))
 
     return polylines
 

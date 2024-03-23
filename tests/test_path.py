@@ -109,9 +109,7 @@ def test_parsing():
             "L",
             [(137.665, 249.592)],
         ),
-        PathCommand(
-            "C", [(137.782, 250.428), (138.109, 251.069), (138.644, 251.514)]
-        ),
+        PathCommand("C", [(137.782, 250.428), (138.109, 251.069), (138.644, 251.514)]),
     ]
     res = svgparser.parse_path(src)
     assert res == expected
@@ -159,8 +157,13 @@ def test_path_geom_simple():
     polys_visib = [poly for poly in polys if poly.drawing]
     assert len(polys_visib) == 2
 
+
 def test_polyline_intersections():
-    pass
+    polya = PolyLine([[0, 0], [0, 1]])
+    inter = list(polya.get_intersections([-0.5, 0.5], [1, 0]))
+    assert len(inter) == 1
+    assert np.allclose(inter[0], [0, 0.5])
+
 
 def test_bvh_intersections():
     ray_start = [0, 0]
@@ -274,7 +277,9 @@ def _test_rendering_matches(mask, img):
 def _render_polylines(polys, random_color=False):
     polys = polys.copy()
 
-    seg_pts = np.array([pt for poly in polys if poly.drawing for pt in poly.pts]).round(2)
+    seg_pts = np.array([pt for poly in polys if poly.drawing for pt in poly.pts]).round(
+        2
+    )
     dims = (np.max(seg_pts, axis=0) - np.min(seg_pts, axis=0)).round().astype(int)
     mask = np.zeros([*dims[::-1], 3], dtype=np.uint8)
 

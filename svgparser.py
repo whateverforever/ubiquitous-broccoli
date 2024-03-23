@@ -80,6 +80,28 @@ class PolyLine:
     def median(self):
         return np.median(self.pts, axis=0)
 
+    def segments(self):
+        for startp, endp in zip(self.pts[:-1], self.pts[1:]):
+            yield (startp, endp)
+
+    def get_intersections(self, ray_start, ray_dir):
+        ray_start = np.array(ray_start)
+
+        x1, y1 = ray_start
+        x2, y2 = ray_start + ray_dir
+
+        for seg in self.segments():
+            x3, y3 = seg[0]
+            x4, y4 = seg[1]
+
+            u = ((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / (
+                (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+            )
+
+            if 0 <= abs(u) <= 1:
+                intersect_pt = seg[0] + abs(u) * np.subtract(seg[1], seg[0])
+                yield intersect_pt
+
     def __eq__(self, other):
         if self.drawing != other.drawing:
             return False
@@ -156,8 +178,9 @@ class BinaryBVH:
         out = []
         for node, dl, dr in self.walk():
             if isinstance(node, PolyLine):
-                # XXX actual intersection
-                out.append(node.median())
+                inters = list(node.get_intersections(ray_start, ray_dir))
+                print("got intersections", inters)
+                out.extend(inters)
 
                 if ax is not None:
                     _render_polylines([node], ax=ax)
@@ -259,7 +282,9 @@ class BinaryBVH:
                 wheres = []
                 diffs = []
                 for split_dim in [0, 1]:
-                    segment_locs = np.array([poly.median()[split_dim] for poly in seggos])
+                    segment_locs = np.array(
+                        [poly.median()[split_dim] for poly in seggos]
+                    )
                     where_left = segment_locs < center[split_dim]
                     where_righ = segment_locs >= center[split_dim]
 
@@ -268,7 +293,7 @@ class BinaryBVH:
 
                     wheres.append((where_left, where_righ))
                     diffs.append(abs(nleft - nrigh))
-                
+
                 where_left, where_righ = wheres[np.argmin(diffs)]
 
             polylines_left = [poly for i, poly in enumerate(seggos) if where_left[i]]

@@ -159,21 +159,20 @@ def test_path_geom_simple():
     assert len(segs_visib) == 2
 
 
-def test_path_hatch():
-    return
-    src = "M 178.91787,36.739211 359.58365,217.405 178.91787,398.07078 -1.7479181,217.405 Z"
-    cmds = svgparser.parse_path(src)
-    segs = svgparser.discretize_path(cmds)
-    segs = svgparser.hatch_path(segs, [0, 0], [1, 0], 50)
+def test_bvh_intersections():
+    ray_start = [0, 0]
+    ray_dir = [1, 0]
 
-    mask = _render_segments(segs)
-    img = cv2.imread(getfile("hatch.png"), cv2.IMREAD_GRAYSCALE)
+    intersected = lambda center, radius: svgparser.BinaryBVH.subtree_intersected(
+        center, radius, ray_start, ray_dir
+    )
 
-    _test_rendering_matches(mask, img)
+    assert intersected((0, 0), 1)
+    assert intersected((2, 0), 1)
+    assert not intersected((-3, 0), 1)
 
 
-def test_bvh2():
-    return
+def test_bvh():
     src = (
         "m 212.88733,-5.4488483 -8.46778,69.4693113 47.76619,-40.035149 z"
         " m -70.85532,51.7752513 -8.46775,69.468207 47.76616,-40.034057 z"
@@ -187,10 +186,9 @@ def test_bvh2():
     )
     cmds = svgparser.parse_path(src)
     segs = svgparser.discretize_path(cmds)
-
     tree = svgparser.BinaryBVH(segs)
 
-    ray_start = np.array([-25, 320])
+    ray_start = np.array([-25, 300])
     ray_dir = np.array([1, -0.5])
     ray_dir /= np.linalg.norm(ray_dir)
 
@@ -200,18 +198,32 @@ def test_bvh2():
         # ax.axis("equal")
 
     ax, ax2 = axs
-    tree.visualize(ax=ax2, only_leaves=True)
-    #
+
     root = tree._tree[0]
     ray_end = ray_start + ray_dir * 2 * root.radius
     ax2.plot(ray_start, ray_end, color="red")
+    tree.visualize(ax=ax2, only_leaves=True)
 
     intersections, debug = tree.get_intersections(ray_start, ray_dir, ax=ax)
     plt.scatter(intersections[:, 0], intersections[:, 1])
+    plt.pause(1)
     plt.show()
 
     print("intersections", intersections)
-    assert len(intersections) == 8
+    assert len(intersections) == 2
+
+
+# def test_path_hatch():
+#     return
+#     src = "M 178.91787,36.739211 359.58365,217.405 178.91787,398.07078 -1.7479181,217.405 Z"
+#     cmds = svgparser.parse_path(src)
+#     segs = svgparser.discretize_path(cmds)
+#     segs = svgparser.hatch_path(segs, [0, 0], [1, 0], 50)
+#
+#     mask = _render_segments(segs)
+#     img = cv2.imread(getfile("hatch.png"), cv2.IMREAD_GRAYSCALE)
+#
+#     _test_rendering_matches(mask, img)
 
 
 ################################################################################

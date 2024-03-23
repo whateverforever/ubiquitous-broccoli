@@ -97,7 +97,7 @@ class Segment:
         return False
 
 
-def _render_segments(segs, ax=None, color=None):
+def _render_segments(segs, ax=None, color=None, jitter=False):
     for seg in segs:
         if not seg.drawing:
             continue
@@ -108,11 +108,11 @@ def _render_segments(segs, ax=None, color=None):
             xs.extend([startp[0], endp[0]])
             ys.extend([startp[1], endp[1]])
 
-        xs = np.array(xs)
-        ys = np.array(ys)
-
-        xs += np.random.normal(scale=2, size=len(xs))
-        ys += np.random.normal(scale=2, size=len(ys))
+        if jitter:
+            xs = np.array(xs)
+            ys = np.array(ys)
+            xs += np.random.normal(scale=2, size=len(xs))
+            ys += np.random.normal(scale=2, size=len(ys))
 
         what = ax if ax is not None else plt
         what.plot(xs, ys, color=color, alpha=0.5)
@@ -151,11 +151,12 @@ class BinaryBVH:
             root = self._tree[0]
             ray_end = ray_start + ray_dir * 2 * root.radius
             ax.plot(ray_start, ray_end, color="red")
-            # self.visualize(ax=ax, color=(0.5, 0.5, 0.5))
+            self.visualize(ax=ax, color=(0.8, 0.8, 0.8))
 
         out = []
         for node, dl, dr in self.walk2():
             if isinstance(node, Segment):
+                # XXX actual intersection
                 out.append(node.median())
 
                 if ax is not None:
@@ -234,19 +235,22 @@ class BinaryBVH:
 
     @staticmethod
     def subtree_contains(center, radius, location):
-        return np.linalg.norm(center - location) <= radius
+        return np.linalg.norm(np.array(center) - location) <= radius
 
     @staticmethod
     def subtree_intersected(center, radius, ray_start, ray_dir):
+        print("ray start contained?")
         if BinaryBVH.subtree_contains(center, radius, ray_start):
+            print("start contained")
             return True
 
         ray_start = np.array(ray_start)
         ray_dir = np.array(ray_dir, dtype=float)
         ray_dir /= np.linalg.norm(ray_dir)
 
-        dist = np.dot(center - ray_start, ray_dir)
+        dist = np.abs(np.dot(center - ray_start, ray_dir))
         spot = ray_start + ray_dir * dist
+        print("dist", dist, "spot", spot)
         print("does", center, radius, "contain", spot)
         return BinaryBVH.subtree_contains(center, radius, spot)
 

@@ -1,4 +1,5 @@
 import re
+import time
 from collections import deque
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple, Union, Collection, Any
@@ -77,6 +78,10 @@ class PolyLine:
         maxs = np.max(self.pts, axis=0)
         return mins, maxs
 
+    def bb_centroid(self):
+        mins, maxs = self.bb()
+        return mins + (maxs - mins) / 2
+
     def median(self):
         return np.median(self.pts, axis=0)
 
@@ -99,10 +104,8 @@ class PolyLine:
             u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / (
                 (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
             )
-            print("uuuuuuuuu before", u)
 
             if 0 <= u <= 1:
-                print("uuuuuuuuuuu", u)
                 intersect_pt = seg[0] + u * (seg[1] - seg[0])
                 yield intersect_pt
 
@@ -150,10 +153,6 @@ class BinaryBVH:
         self._tree = self.build_tree(self._polylines)
 
     def visualize(self, ax=None, color=None, only_leaves=False):
-        root = self._tree[0]
-        radius = int(root.radius)
-        img = np.zeros((2 * radius, 2 * radius))
-
         ax = ax if ax is not None else plt.gca()
 
         for node, *_ in self.walk():
@@ -164,8 +163,12 @@ class BinaryBVH:
             if only_leaves:
                 continue
 
+            xy, maxs = node.bb
+            w, h = maxs - xy
+
             ax.add_patch(
-                patches.Circle(node.center, node.radius, fill=False, color=color)
+                #    patches.Circle(node.center, node.radius, fill=False, color=color)
+                patches.Rectangle(xy, w, h, fill=False, color=color)
             )
 
     def get_intersections(self, ray_start, ray_dir, ax=None):
@@ -175,13 +178,15 @@ class BinaryBVH:
 
         if ax is not None:
             root = self._tree[0]
-            ray_end = ray_start + ray_dir * 2 * root.radius
+            print("root", root.bb)
+            ray_end = ray_start + ray_dir * np.linalg.norm(root.bb[1] - root.bb[0])
             ax.plot([ray_start[0], ray_end[0]], [ray_start[1], ray_end[1]], color="red")
             self.visualize(ax=ax, color=(0.9, 0.9, 0.9))
 
         n_visited_nodes = 0
         n_visited_polys = 0
         out = []
+        dists = []
 
         for node, dl, dr in self.walk():
             if isinstance(node, PolyLine):
@@ -189,6 +194,7 @@ class BinaryBVH:
 
                 inters = list(node.get_intersections(ray_start, ray_dir))
                 out.extend(inters)
+                dists.extend([np.dot(x - ray_start, ray_dir) for x in inters])
 
                 if ax is not None:
                     _render_polylines([node], ax=ax)
@@ -200,19 +206,24 @@ class BinaryBVH:
                 ax.set_title(
                     f"visited {n_visited_nodes}/{len(self._tree)} nodes, evaluated {n_visited_polys}/{len(self._polylines)} polylines"
                 )
-                ax.add_patch(patches.Circle(node.center, node.radius, fill=False))
-                plt.pause(1)
+                xy, maxs = node.bb
+                w, h = maxs - xy
+                ax.add_patch(
+                    patches.Rectangle(xy, w, h, fill=False)
+                    # patches.Circle(node.center, node.radius, fill=False)
+                )
+                plt.pause(0.1)
 
             left = self._tree[node.left]
             righ = self._tree[node.right]
 
-            if not isinstance(left, PolyLine) and not BinaryBVH.subtree_intersected(
-                left.center, left.radius, ray_start, ray_dir
+            if not isinstance(left, PolyLine) and not BinaryBVH.bbox_intersected(
+                left.bb, ray_start, ray_dir
             ):
                 dl()
 
-            if not isinstance(righ, PolyLine) and not BinaryBVH.subtree_intersected(
-                righ.center, righ.radius, ray_start, ray_dir
+            if not isinstance(righ, PolyLine) and not BinaryBVH.bbox_intersected(
+                righ.bb, ray_start, ray_dir
             ):
                 dr()
 
@@ -222,7 +233,14 @@ class BinaryBVH:
             )
             plt.pause(1)
 
-        return np.array(out), dict(
+        idxs = np.argsort(dists)
+        out = np.array(out)[idxs]
+
+        print("dists", dists)
+        print("sorted", np.array(dists)[idxs])
+        print("out", out)
+
+        return out, dict(
             n_visited_polys=n_visited_polys, n_visited_nodes=n_visited_nodes
         )
 
@@ -253,26 +271,33 @@ class BinaryBVH:
                 nodes.append(self._tree[n.right])
 
     @staticmethod
-    def subtree_contains(center, radius, location):
-        return np.linalg.norm(np.array(center) - location) <= radius
+    def bbox_contains(bb, location):
+        mins, maxs = bb
+
+        return np.all(mins <= location) and np.all(location <= maxs)
 
     @staticmethod
-    def subtree_intersected(center, radius, ray_start, ray_dir):
-        if BinaryBVH.subtree_contains(center, radius, ray_start):
+    def bbox_intersected(bb, ray_start, ray_dir):
+        if BinaryBVH.bbox_contains(bb, ray_start):
             return True
 
-        ray_start = np.array(ray_start)
-        ray_dir = np.array(ray_dir, dtype=float)
-        ray_dir /= np.linalg.norm(ray_dir)
+        mins, maxs = bb
+        pts = [
+            (mins[0], mins[1]),
+            (maxs[0], maxs[1]),
+            (mins[0], maxs[1]),
+            (maxs[0], mins[1]),
+            (mins[0], mins[1]),
+        ]
 
-        dist = np.abs(np.dot(center - ray_start, ray_dir))
-        spot = ray_start + ray_dir * dist
-        return BinaryBVH.subtree_contains(center, radius, spot)
+        for _ in PolyLine(pts=pts).get_intersections(ray_start, ray_dir):
+            return True
+        
+        return False
 
     @dataclass
     class Node:
-        center: Any
-        radius: float
+        bb: Tuple[float, float, float, float]
         left: int
         right: int
 
@@ -290,10 +315,8 @@ class BinaryBVH:
         while to_split:
             seggos, this_idx = to_split.popleft()
 
-            mini, maxi = get_polylines_bb(seggos)
-            dims = maxi - mini
-            center = mini + dims / 2
-            radius = np.linalg.norm(dims) / 2
+            mini, maxi = bb = get_polylines_bb(seggos)
+            bb_center = mini + (maxi - mini) / 2
 
             if len(seggos) == 2:
                 where_left = [True, False]
@@ -301,20 +324,31 @@ class BinaryBVH:
             else:
                 wheres = []
                 diffs = []
+                spreads = []
                 for split_dim in [0, 1]:
-                    segment_locs = np.array(
-                        [poly.median()[split_dim] for poly in seggos]
+                    poly_locs = np.array(
+                        [poly.bb_centroid()[split_dim] for poly in seggos]
                     )
-                    where_left = segment_locs < center[split_dim]
-                    where_righ = segment_locs >= center[split_dim]
+                    where_left = poly_locs < bb_center[split_dim]
+                    where_righ = poly_locs >= bb_center[split_dim]
 
                     nleft = np.count_nonzero(where_left)
                     nrigh = np.count_nonzero(where_righ)
 
                     wheres.append((where_left, where_righ))
                     diffs.append(abs(nleft - nrigh))
+                    spreads.append(
+                        np.abs(np.max(poly_locs, axis=0) - np.min(poly_locs, axis=0))
+                    )
 
-                where_left, where_righ = wheres[np.argmin(diffs)]
+                print("diffs", diffs, "spreads", spreads)
+
+                where_left, where_righ = wheres[np.argmax(spreads)]
+
+                if np.all(where_left) or np.all(where_righ):
+                    print("falling back to counting!")
+                    where_left, where_righ = wheres[np.argmin(diffs)]
+                    # wheres
 
             polylines_left = [poly for i, poly in enumerate(seggos) if where_left[i]]
             polylines_righ = [poly for i, poly in enumerate(seggos) if where_righ[i]]
@@ -332,11 +366,18 @@ class BinaryBVH:
                 tree[this_idx] = polylines_left[0]
                 raise RuntimeError("asdf")
             elif polylines_righ and not polylines_left:
-                assert len(polylines_righ) == 1
+                if len(polylines_righ) > 1:
+                    print("where left", where_left)
+                    print("where righ", where_righ)
+                    _render_polylines(polylines_righ)
+                    plt.scatter([bb_center[0]], [bb_center[1]])
+                    plt.show()
+
+                assert len(polylines_righ) == 1, f"pol{polylines_righ}"
                 tree[this_idx] = polylines_righ[0]
                 raise RuntimeError("iouoiuoiu")
             else:
-                tree[this_idx] = BinaryBVH.Node(center, radius, left_idx, righ_idx)
+                tree[this_idx] = BinaryBVH.Node(bb, left_idx, righ_idx)
 
             if len(polylines_left) > 1:
                 to_split.append((polylines_left, left_idx))
@@ -591,11 +632,18 @@ def get_polylines_bb(polylines: Collection[PolyLine]):
     return mini, maxi
 
 
+def get_polylines_pts(polylines):
+    return np.unique(
+        [pt for poly in polylines for pt in poly.pts if poly.drawing], axis=0
+    )
+
+
 def hatch_path(
     polylines: Collection[PolyLine],
     hatch_start_xy=None,
     hatch_dir=None,
     hatch_dist=None,
+    ax=None,
 ):
     mini, maxi = get_polylines_bb(polylines)
     dims = maxi - mini
@@ -611,19 +659,27 @@ def hatch_path(
         hatch_normal *= -1
 
     diag = np.dot(dims, hatch_normal)
-    nsteps = round(diag / hatch_dist) + 1 # edgar der unsaubere zauberer
+    nsteps = round(diag / hatch_dist) + 1  # edgar der unsaubere zauberer
 
+    t1 = time.perf_counter()
     tree = BinaryBVH(polylines)
+    t2 = time.perf_counter()
+    print("tree constructino took", t2 - t1)
 
-    _, ax = plt.subplots()
     for k in range(nsteps):
-        anchor = mini + k * hatch_dist * hatch_normal
+        anchor = mini - 1 + k * hatch_dist * hatch_normal
         other = anchor + np.dot(dims, hatch_dir) * hatch_dir
 
         print("anchor", anchor, other - anchor)
         inters, _ = tree.get_intersections(anchor, other - anchor, ax=ax)
         print("inters", inters)
-        polylines.append(PolyLine(inters))
+
+        for startp, endp in zip(inters[:-1][::2], inters[1:][::2]):
+            print("from to", startp, endp)
+            polylines.append(PolyLine([startp, endp]))
+
+        if ax is not None and len(inters):
+            ax.scatter(inters[:, 0], inters[:, 1])
 
     return polylines
 

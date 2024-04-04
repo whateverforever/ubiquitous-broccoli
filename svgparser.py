@@ -208,11 +208,8 @@ class BinaryBVH:
                 )
                 xy, maxs = node.bb
                 w, h = maxs - xy
-                ax.add_patch(
-                    patches.Rectangle(xy, w, h, fill=False)
-                    # patches.Circle(node.center, node.radius, fill=False)
-                )
-                plt.pause(0.1)
+                ax.add_patch(patches.Rectangle(xy, w, h, fill=False))
+                plt.pause(0.05)
 
             left = self._tree[node.left]
             righ = self._tree[node.right]
@@ -235,10 +232,6 @@ class BinaryBVH:
 
         idxs = np.argsort(dists)
         out = np.array(out)[idxs]
-
-        print("dists", dists)
-        print("sorted", np.array(dists)[idxs])
-        print("out", out)
 
         return out, dict(
             n_visited_polys=n_visited_polys, n_visited_nodes=n_visited_nodes
@@ -292,7 +285,7 @@ class BinaryBVH:
 
         for _ in PolyLine(pts=pts).get_intersections(ray_start, ray_dir):
             return True
-        
+
         return False
 
     @dataclass
@@ -341,14 +334,11 @@ class BinaryBVH:
                         np.abs(np.max(poly_locs, axis=0) - np.min(poly_locs, axis=0))
                     )
 
-                print("diffs", diffs, "spreads", spreads)
-
                 where_left, where_righ = wheres[np.argmax(spreads)]
 
                 if np.all(where_left) or np.all(where_righ):
                     print("falling back to counting!")
                     where_left, where_righ = wheres[np.argmin(diffs)]
-                    # wheres
 
             polylines_left = [poly for i, poly in enumerate(seggos) if where_left[i]]
             polylines_righ = [poly for i, poly in enumerate(seggos) if where_righ[i]]
@@ -632,7 +622,7 @@ def get_polylines_bb(polylines: Collection[PolyLine]):
     return mini, maxi
 
 
-def get_polylines_pts(polylines):
+def get_polylines_pts(polylines: Collection[PolyLine]):
     return np.unique(
         [pt for poly in polylines for pt in poly.pts if poly.drawing], axis=0
     )
@@ -657,19 +647,31 @@ def hatch_path(
     hatch_normal = np.array([dy, -dx])
     if np.dot(hatch_normal, [1, 1]) < 0:
         hatch_normal *= -1
+    
+    pts = np.array([
+        (mini[0], mini[1]),
+        (maxi[0], maxi[1]),
+        (mini[0], maxi[1]),
+        (maxi[0], mini[1]),
+    ])
+    dists = np.dot(pts, hatch_normal)
+    assert len(dists) == 4
 
-    diag = np.dot(dims, hatch_normal)
+    diag = np.max(dists) - np.min(dists)
     nsteps = round(diag / hatch_dist) + 1  # edgar der unsaubere zauberer
 
-    t1 = time.perf_counter()
+    t1 = time.monotonic()
     tree = BinaryBVH(polylines)
-    t2 = time.perf_counter()
+    t2 = time.monotonic()
     print("tree constructino took", t2 - t1)
 
+    print("mini", mini)
+
     for k in range(nsteps):
-        anchor = mini - 1 + k * hatch_dist * hatch_normal
+        anchor = np.array(hatch_start_xy) - 1 + k * hatch_dist * hatch_normal
         other = anchor + np.dot(dims, hatch_dir) * hatch_dir
 
+        print("at y", k * hatch_dist * hatch_normal)
         print("anchor", anchor, other - anchor)
         inters, _ = tree.get_intersections(anchor, other - anchor, ax=ax)
         print("inters", inters)

@@ -11,7 +11,7 @@ from svgparser import PathCommand, BinaryBVH, PolyLine
 import pytest
 from pytest import approx
 
-DEBUG = True
+DEBUG = False
 TDIR = osp.dirname(__file__)
 getfile = lambda *x: osp.join(TDIR, *x)
 
@@ -230,74 +230,70 @@ def test_bvh():
 
 
 def test_path_hatch():
+    # simple hatched diamond
     src = "M 178.91787,36.739211 359.58365,217.405 178.91787,398.07078 -1.7479181,217.405 Z"
     cmds = svgparser.parse_path(src)
     polys = svgparser.discretize_path(cmds)
-    polys = svgparser.hatch_path(polys, [0, 0], [1, 0], 50)
+    polys = svgparser.hatch_path(polys, [0, 38], [1, 0], 50)
 
-    mask = _render_polylines(polys)
-    # img = cv2.imread(getfile("hatch.png"), cv2.IMREAD_GRAYSCALE)
-    cv2.imshow("asdf", mask)
-    cv2.waitKey(0)
+    mask = _render_polylines(polys, line_thickness=1)
+    img = cv2.imread(getfile("hatch.png"), cv2.IMREAD_GRAYSCALE)
+    _test_rendering_matches(mask, img)
 
-    # _test_rendering_matches(mask, img)
-
+    # much bigger more complex pattern with many consecutive intersections
     src = expected["text"][0]
     cmds = svgparser.parse_path(src)
     polys = svgparser.discretize_path(cmds)
+    polys = svgparser.hatch_path(polys, [-118.56674, 332.36563], [1, 0], 10)
 
-    fig, ax = plt.subplots()
-    polys = svgparser.hatch_path(polys, [0, 0], [1, 0], 10, ax=ax)
-    plt.show()
-
-    mask = _render_polylines(polys, random_color=True)
-    cv2.imshow("asdf", mask)
-    cv2.waitKey(0)
+    mask = _render_polylines(polys, line_thickness=1)
+    img = cv2.imread(getfile("hatch_text.png"), cv2.IMREAD_GRAYSCALE)
+    _test_rendering_matches(mask, img)
 
 
 ################################################################################
 ### test helper funs
 
 
-def _test_rendering_matches(mask, img):
+def _test_rendering_matches(img_pred, img_gt):
     if DEBUG:
-        print(f"shapes mask={mask.shape}, expected={img.shape}")
-        cv2.imshow("rendered", mask)
-        cv2.imshow("expected", img)
+        print(f"shapes mask={img_pred.shape}, expected={img_gt.shape}")
+        cv2.imshow("rendered", img_pred)
+        cv2.imshow("expected", img_gt)
         cv2.waitKey(0)
 
     assert (
-        mask.shape == img.shape
-    ), f"Rendering has wrong shape {mask.shape} vs {img.shape}"
+        img_pred.shape == img_gt.shape
+    ), f"Rendering has wrong shape {img_pred.shape} vs {img_gt.shape}"
 
-    img_dil = cv2.dilate(img, np.ones((3, 3))) > 0
-    mask_dil = mask > 0  # cv2.dilate(mask, np.ones((3, 3))) > 0
+    img_dil = cv2.dilate(img_gt, np.ones((3, 3))) > 0
+    mask_dil = cv2.dilate(img_pred, np.ones((3, 3))) > 0
 
     if DEBUG:
-        vis = np.zeros((*img.shape, 3), dtype=np.uint8)
+        vis = np.zeros((*img_gt.shape, 3), dtype=np.uint8)
         vis[img_dil] = (255, 255, 0)
-        vis[mask > 0] = (40, 40, 255)
+        vis[img_pred > 0] = (40, 40, 255)
         cv2.imshow("rendering (red) contained in expected (blueish)?", vis)
 
-        vis = np.zeros((*img.shape, 3), dtype=np.uint8)
+        vis = np.zeros((*img_gt.shape, 3), dtype=np.uint8)
         vis[mask_dil] = (40, 40, 255)
-        vis[img > 0] = (255, 255, 0)
+        vis[img_gt > 0] = (255, 255, 0)
         cv2.imshow("rendering (red) covering all of expected (blueish)?", vis)
 
         cv2.waitKey(0)
 
     # Is our rendering contained within the expected?
-    num_matched = np.count_nonzero(img_dil[mask > 0])
-    num_predicted = np.count_nonzero(mask)
+    num_matched = np.count_nonzero(img_dil[img_pred > 0])
+    num_predicted = np.count_nonzero(img_pred)
     assert num_matched / num_predicted == approx(1.0, abs=0.01)
 
     # Is our rendering complete?
-    num_expected = np.count_nonzero(img)
-    num_found = np.count_nonzero(mask_dil[img > 0])
+    num_expected = np.count_nonzero(img_gt)
+    num_found = np.count_nonzero(mask_dil[img_gt > 0])
     assert num_found / num_expected == approx(1.0, abs=0.01)
 
 
-def _render_polylines(polys, random_color=False):
+def _render_polylines(polys, random_color=False, line_thickness=2):
     polys = polys.copy()
 
     seg_pts = np.array([pt for poly in polys if poly.drawing for pt in poly.pts]).round(
@@ -320,7 +316,7 @@ def _render_polylines(polys, random_color=False):
                 color = tuple(np.random.randint(100, 255, size=3).tolist())
 
             # Make line slightly thicker to account for different antialiasing
-            cv2.line(mask, startp.astype(int), endp.astype(int), color, 2)
+            cv2.line(mask, startp.astype(int), endp.astype(int), color, line_thickness)
 
     if random_color:
         return mask
